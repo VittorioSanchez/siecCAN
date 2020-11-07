@@ -74,7 +74,7 @@ MUT_ena_steer = Lock()
 class MyReceive(Thread):
     def __init__(self, bus):
         Thread.__init__(self)
-        self.conn = conn
+        #self.conn = conn
         self.bus  = can.interface.Bus(channel='can0', bustype='socketcan_native')
 
         self.speed_cmd = 0
@@ -195,7 +195,7 @@ if __name__ == '__main__':
         print('Cannot find PiCAN board.')
         exit()
 
-    newthread = MyReceive(conn, bus)
+    newthread = MyReceive( bus)
     newthread.start()
     newthread.join()
 
