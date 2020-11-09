@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # coding: utf-8
 from threading import Thread
 import time
@@ -49,9 +50,9 @@ OM2 = 0x102
     - Modification de la vitesse
     header : SPE payload : valeur entre 0 et 50
     - Control du volant (droite, gauche)
-    header : STE paylaod : left | right | stop
-    - Contra l de l'avancée
-    header : MOV payload : forward | backward | stop
+    header : STE paylaod : left  right  stop
+    - Contra l de l'avancee
+    header : MOV payload : forward  backward  stop
 '''
 
 class MySend(Thread):
@@ -240,7 +241,7 @@ import socket
 if __name__ == "__main__":
 
     print('Bring up CAN0....')
-    os.system("sudo /sbin/ip link set can0 up type can bitrate 400000")
+    #os.system("sudo /sbin/ip link set can0 up type can bitrate 400000")
     time.sleep(0.1)
 
     try:
@@ -249,7 +250,12 @@ if __name__ == "__main__":
         print('Cannot find PiCAN board.')
         exit()
 
-
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind((HOST, PORT))
+    s.listen(1)
+    conn, addr = s.accept()
+    print('Connected by', addr)
+    
     newthread = MyReceive(conn, bus)
     newthread.start()
     newsend = MySend(conn, bus)

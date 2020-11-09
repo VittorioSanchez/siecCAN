@@ -58,7 +58,7 @@ OM1 = 0x101
 OM2 = 0x102
 
 
-speed = 0
+speed = 12
 mov = 0
 ori = 0
 ena_prop = 0
@@ -92,9 +92,11 @@ class MyReceive(Thread):
 
         while True :
 
-	    MUT_speed.acquire()
-    	    self.speed_cmd = speed
-    	    MUT_speed.release()
+            MUT_speed.acquire()
+            global speed
+            self.speed_cmd = int(speed)
+            MUT_speed.release()
+            print(speed)
             """data = conn.recv(1024)
 
             if not data: break
@@ -144,6 +146,7 @@ class MyReceive(Thread):
 
             if self.enable_speed:
                 cmd_mv = (50 + self.movement*self.speed_cmd) | 0x80
+                print('move enable')
             else:
                 cmd_mv = (50 + self.movement*self.speed_cmd) & ~0x80
 
@@ -152,23 +155,32 @@ class MyReceive(Thread):
             else:
                 cmd_turn = 50 + self.turn*30 & 0x80
 
-            print("mv:",cmd_mv,"turn:",cmd_turn)
+            print("mv:",(50 + self.movement*self.speed_cmd),"turn:",cmd_turn)
 
             msg = can.Message(arbitration_id=MCM,data=[cmd_mv, cmd_mv, cmd_turn,0,0,0,0,0],extended_id=False)
 
             #msg = can.Message(arbitration_id=0x010,data=[0xBC,0xBC,0x00, 0x00, 0x00, 0x00,0x00, 0x00],extended_id=False)
             #msg = can.Message(arbitration_id=MCM,data=[0xBC,0xBC,0x00, 0x00, 0x00, 0x00,0x00, 0x00],extended_id=False)
             #print(msg)
-            self.bus.send(msg)
+            try:
+                self.bus.send(msg)
+                print("Message sent")
+            except can.CanError:
+                print("Message NOT sent")
+            
+            time.sleep(0.1)
+    
 
 
 def callback(data):
-    rospy.loginfo(rospy.get_caller_id() + 'I heard %d', data.linear.x)
+    #rospy.loginfo(rospy.get_caller_id() + 'I heard %d', data.linear.x)
+    print('I heard %d', data.linear.x)
     MUT_speed.acquire()
+    global speed
     speed = data.linear.x
     MUT_speed.release()
+    print(speed)
     
-
 def listener():
 
     # In ROS, nodes are uniquely named. If two nodes with the same
@@ -180,13 +192,14 @@ def listener():
 
     rospy.Subscriber('/cmd_vel', Twist, callback)
 
-    # spin() simply keeps python from exiting until this node is stopped
-    rospy.spin()
+    
 
 if __name__ == '__main__':
-
+    
+    listener()
+    #ifconfig can0 txqueuelen 1000
     print('Bring up CAN0....')
-    os.system("sudo /sbin/ip link set can0 up type can bitrate 400000")
+    #os.system("sudo /sbin/ip link set can0 up type can bitrate 400000")
     time.sleep(0.1)
 
     try:
@@ -195,9 +208,11 @@ if __name__ == '__main__':
         print('Cannot find PiCAN board.')
         exit()
 
-    newthread = MyReceive( bus)
+    newthread = MyReceive(bus)
     newthread.start()
-    newthread.join()
+    #newthread.join()
 
-    listener()
+    
+    # spin() simply keeps python from exiting until this node is stopped
+    rospy.spin()
 

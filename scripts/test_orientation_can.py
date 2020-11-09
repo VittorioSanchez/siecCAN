@@ -36,10 +36,10 @@
 ## Simple talker demo that listens to std_msgs/Strings published 
 ## to the 'chatter' topic
 
-import rospy
+"""import rospy
 
 from std_msgs.msg import String
-from geometry_msgs.msg import Twist 
+from geometry_msgs.msg import Twist """
 
 from threading import Thread, Lock
 import time
@@ -58,7 +58,7 @@ OM1 = 0x101
 OM2 = 0x102
 
 
-speed = 0
+speed = 20
 mov = 0
 ori = 0
 ena_prop = 0
@@ -71,16 +71,11 @@ MUT_ena_prop = Lock()
 MUT_ena_steer = Lock()
 
 
-class MyReceive(Thread):
+"""class MyReceive(Thread):
     def __init__(self, bus):
-        Thread.__init__(self)
-	"""try:
-            self.bus = can.interface.Bus(channel='can0', bustype='socketcan_native')
-    	except OSError:
-            print('Cannot connect can myreceive')
-            exit()"""
-
-	self.bus = bus
+        Thread.__init__(self)	
+        self.bus = can.interface.Bus(channel='can0', bustype='socketcan_native')
+        #self.bus = bus
         self.speed_cmd = 0
         self.movement = 0
         self.turn = 0
@@ -96,10 +91,10 @@ class MyReceive(Thread):
 
         while True :
 
-	    MUT_speed.acquire()
-    	    self.speed_cmd = speed
-    	    MUT_speed.release()
-            """data = conn.recv(1024)
+            MUT_speed.acquire()
+            self.speed_cmd = speed
+            MUT_speed.release()
+            data = conn.recv(1024)
 
             if not data: break
 
@@ -144,7 +139,7 @@ class MyReceive(Thread):
             print(self.movement)
             print(self.enable)
             print(self.turn)
-            print(self.enable_steering)"""
+            print(self.enable_steering)""""""
 
             if self.enable_speed:
                 cmd_mv = (50 + self.movement*self.speed_cmd) | 0x80
@@ -166,7 +161,7 @@ class MyReceive(Thread):
             self.bus.send(msg)
 
 
-def callback(data):
+""""""def callback(data):
     rospy.loginfo(rospy.get_caller_id() + 'I heard %d', data.linear.x)
     MUT_speed.acquire()
     speed = 20 #data.linear.x
@@ -185,12 +180,12 @@ def listener():
     rospy.Subscriber('/cmd_vel', Twist, callback)
 
     # spin() simply keeps python from exiting until this node is stopped
-    rospy.spin()
+    rospy.spin()"""
 
 if __name__ == '__main__':
 
     print('Bring up CAN0....')
-    os.system("sudo /sbin/ip link set can0 up type can bitrate 400000")
+    #os.system("sudo /sbin/ip link set can0 up type can bitrate 400000")
     time.sleep(0.1)
 
     try:
@@ -199,9 +194,40 @@ if __name__ == '__main__':
         print('Cannot find PiCAN board.')
         exit()
 
-    newthread = MyReceive(conn, bus)
+    """newthread = MyReceive(bus)
     newthread.start()
-    newthread.join()
+    newthread.join()"""
+    
+    speed_cmd = 0
+    movement = 1
+    turn = 0
+    enable_steering = 0
+    enable_speed = 1
 
-    listener()
+    while True :
+
+        MUT_speed.acquire()
+        speed_cmd = speed
+        MUT_speed.release()
+    
+        if enable_speed:
+                cmd_mv = (50 + movement*speed_cmd) | 0x80
+        else:
+                cmd_mv = (50 + movement*speed_cmd) & ~0x80
+
+        if enable_steering:
+                cmd_turn = 50 + turn*30 | 0x80
+        else:
+                cmd_turn = 50 + turn*30 & 0x80
+
+        print("mv:",cmd_mv,"turn:",cmd_turn)
+
+        msg = can.Message(arbitration_id=MCM,data=[cmd_mv, cmd_mv, cmd_turn,0,0,0,0,0],extended_id=False)
+
+            #msg = can.Message(arbitration_id=0x010,data=[0xBC,0xBC,0x00, 0x00, 0x00, 0x00,0x00, 0x00],extended_id=False)
+            #msg = can.Message(arbitration_id=MCM,data=[0xBC,0xBC,0x00, 0x00, 0x00, 0x00,0x00, 0x00],extended_id=False)
+            #print(msg)
+        bus.send(msg)
+
+    #listener()
 

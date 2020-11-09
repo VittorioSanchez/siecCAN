@@ -18,6 +18,7 @@ def talker():
         pub.publish(move_cmd)
         rate.sleep()
 
+
 if __name__ == '__main__':
     try:
         talker()
