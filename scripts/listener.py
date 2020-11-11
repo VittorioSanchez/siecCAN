@@ -40,6 +40,8 @@ import rospy
 
 from std_msgs.msg import String
 from geometry_msgs.msg import Twist 
+from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import MultiArrayDimension
 
 from threading import Thread, Lock
 import time
@@ -156,6 +158,45 @@ class MyReceive(Thread):
                 print("Message NOT sent")
             
             time.sleep(0.1)
+            
+class MySend(Thread):
+
+    def __init__(self, bus):
+        Thread.__init__(self)
+        self.bus = bus
+        
+        self.bat = 0
+        self.angle = 0
+        self.speed_left = 0
+        self.speed_right = 0
+
+    def run(self):
+        while True :
+            msg = self.bus.recv()
+
+            #print(msg.arbitration_id, msg.data)
+            st = ""
+
+            if msg.arbitration_id == MS:
+                # position volant
+                self.angle = int.from_bytes(msg.data[0:2], byteorder='big')
+                # Niveau de la batterie
+                self.bat = int.from_bytes(msg.data[2:4], byteorder='big')            
+                # vitesse roue gauche
+                self.speed_left = int.from_bytes(msg.data[4:6], byteorder='big')
+                # vitesse roue droite
+                # header : SWR payload : entier, *0.01rpm
+                self.speed_right= int.from_bytes(msg.data[6:8], byteorder='big')
+                
+                print("angle: "+self.angle+";bat: "+self.bat+";sp-left: "+self.speed_left+"; sp-right: "+self.speed_right)
+                
+            MUT_mot_sens.acquire()
+            global mot_sens
+            mot_sens.Bat_mes = self.bat
+            mot_sens.Vol_mes = self.angle
+            mot_sens.VMG_mes = self.speed_left
+            mot_sens.VMD_mes = self.speed_right
+            MUT_mot_sens.release()
     
 
 
@@ -178,6 +219,29 @@ def listener():
     rospy.init_node('listener', anonymous=True)
 
     rospy.Subscriber('/cmd_vel', Twist, callback)
+ 
+class MyTalker(Thread):
+
+    def __init__(self):
+        Thread.__init__(self)
+
+    def run(self):
+        pub = rospy.Publisher('/mot_sens', Float32MultiArray, queue_size=10)
+        #rospy.init_node('talker', anonymous=True)
+        rate = rospy.Rate(10) # 10hz
+        vect = Float32MultiArray()
+        vect.layout.dim.append(MultiArrayDimension())
+        vect.layout.dim[0].label = "height"
+        vect.layout.dim[0].size = 4
+        vect.layout.dim[0].stride = 4
+        
+        while not rospy.is_shutdown():
+            MUT_mot_sens.acquire()
+            global mot_sens
+            vect.data = [mot_sens.Vol_mes, mot_sens.Bat_mes, mot_sens.VMG_mes, mot_sens.VMD_mes]    
+            MUT_mot_sens.release()
+            pub.publish(vect)
+            rate.sleep()
 
 
 
@@ -189,7 +253,19 @@ class MCM_ROS:
 mot_cons = MCM_ROS()
 MUT_mot_cons = Lock()
 
+class MS_ROS:
+    def __init__(self):
+        self.Vol_mes = 0   #Bytes 0-1
+        self.Bat_mes = 0   #Bytes 2-3
+        self.VMG_mes = 0   #Bytes 4-5
+        self.VMD_mes = 0   #Bytes 6-7
+
+mot_sens = MS_ROS()
+MUT_mot_sens = Lock()
+
 if __name__ == '__main__':
+    
+    
     listener()
     #ifconfig can0 txqueuelen 1000
     print('Bring up CAN0....')
@@ -204,6 +280,11 @@ if __name__ == '__main__':
 
     newthread = MyReceive(bus)
     newthread.start()
+    newsend = MySend(bus)
+    newsend.start()
+    
+    newrostalker = MyTalker()
+    newrostalker.start()
     #newthread.join()
 
     
