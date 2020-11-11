@@ -58,18 +58,6 @@ OM1 = 0x101
 OM2 = 0x102
 
 
-speed = 12
-mov = 0
-ori = 0
-ena_prop = 0
-ena_steer = 0
-
-MUT_speed = Lock()
-MUT_mov = Lock()
-MUT_ori = Lock()
-MUT_ena_prop = Lock()
-MUT_ena_steer = Lock()
-
 
 class MyReceive(Thread):
     def __init__(self, bus):
@@ -87,16 +75,16 @@ class MyReceive(Thread):
         self.speed_cmd = 0
         self.movement = 1
         self.turn = 0
-        self.enable_steering = 0
+        self.enable_steering = 1
         self.enable_speed = 1
 
         while True :
+	    MUT_mot_cons.acquire()
+            global mot_cons
+            self.speed_cmd = mot_cons.sp
+            self.turn = mot_cons.tr
+            MUT_mot_cons.release()
 
-            MUT_speed.acquire()
-            global speed
-            self.speed_cmd = int(speed)
-            MUT_speed.release()
-            print(speed)
             """data = conn.recv(1024)
 
             if not data: break
@@ -145,17 +133,16 @@ class MyReceive(Thread):
             print(self.enable_steering)
 
             if self.enable_speed:
-                cmd_mv = (50 + self.movement*self.speed_cmd) | 0x80
-                print('move enable')
+                cmd_mv = (50 + self.speed_cmd) | 0x80
             else:
-                cmd_mv = (50 + self.movement*self.speed_cmd) & ~0x80
+                cmd_mv = (50 + self.speed_cmd) & ~0x80
 
             if self.enable_steering:
-                cmd_turn = 50 + self.turn*30 | 0x80
+                cmd_turn = self.turn | 0x80
             else:
-                cmd_turn = 50 + self.turn*30 & 0x80
+                cmd_turn = self.turn & 0x80
 
-            print("mv:",(50 + self.movement*self.speed_cmd),"turn:",cmd_turn)
+            print("mv:",(50 + self.speed_cmd),"turn:", self.turn)
 
             msg = can.Message(arbitration_id=MCM,data=[cmd_mv, cmd_mv, cmd_turn,0,0,0,0,0],extended_id=False)
 
@@ -175,11 +162,11 @@ class MyReceive(Thread):
 def callback(data):
     #rospy.loginfo(rospy.get_caller_id() + 'I heard %d', data.linear.x)
     print('I heard %d', data.linear.x)
-    MUT_speed.acquire()
-    global speed
-    speed = data.linear.x
-    MUT_speed.release()
-    print(speed)
+    MUT_mot_cons.acquire()
+    global mot_cons
+    mot_cons.sp = int(data.linear.x)
+    mot_cons.tr = int(data.angular.z)
+    MUT_mot_cons.release()
     
 def listener():
 
@@ -192,10 +179,17 @@ def listener():
 
     rospy.Subscriber('/cmd_vel', Twist, callback)
 
-    
+
+
+class MCM_ROS:
+    def __init__(self):
+        self.sp = 0
+        self.tr = 50
+
+mot_cons = MCM_ROS()
+MUT_mot_cons = Lock()
 
 if __name__ == '__main__':
-    
     listener()
     #ifconfig can0 txqueuelen 1000
     print('Bring up CAN0....')
@@ -215,4 +209,3 @@ if __name__ == '__main__':
     
     # spin() simply keeps python from exiting until this node is stopped
     rospy.spin()
-
