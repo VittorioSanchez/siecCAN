@@ -48,6 +48,7 @@ import time
 import can
 import os
 import struct
+import codecs
 
 HOST = ''                 # Symbolic name meaning all available interfaces
 PORT = 6666              # Arbitrary non-privileged port
@@ -179,16 +180,16 @@ class MySend(Thread):
 
             if msg.arbitration_id == MS:
                 # position volant
-                self.angle = int.from_bytes(msg.data[0:2], byteorder='big')
+                self.angle = int(codecs.encode(msg.data[0:2],'hex'), 16)
                 # Niveau de la batterie
-                self.bat = int.from_bytes(msg.data[2:4], byteorder='big')            
+                self.bat = int(codecs.encode(msg.data[2:4],'hex'), 16)            
                 # vitesse roue gauche
-                self.speed_left = int.from_bytes(msg.data[4:6], byteorder='big')
+                self.speed_left = int(codecs.encode(msg.data[4:6],'hex'), 16)
                 # vitesse roue droite
                 # header : SWR payload : entier, *0.01rpm
-                self.speed_right= int.from_bytes(msg.data[6:8], byteorder='big')
+                self.speed_right= int(codecs.encode(msg.data[6:8],'hex'), 16)
                 
-                print("angle: "+self.angle+";bat: "+self.bat+";sp-left: "+self.speed_left+"; sp-right: "+self.speed_right)
+                print("angle: ",self.angle,";bat: ",self.bat,";sp-left: ",self.speed_left,"; sp-right: ",self.speed_right)
                 
             MUT_mot_sens.acquire()
             global mot_sens
