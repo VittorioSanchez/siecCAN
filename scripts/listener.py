@@ -49,9 +49,7 @@ import can
 import os
 import struct
 import codecs
-
-HOST = ''                 # Symbolic name meaning all available interfaces
-PORT = 6666              # Arbitrary non-privileged port
+from ctypes import *
 
 MCM = 0x010
 MS = 0x100
@@ -69,71 +67,24 @@ class MyReceive(Thread):
         self.bus  = can.interface.Bus(channel='can0', bustype='socketcan_native')
 
         self.speed_cmd = 0
-        self.movement = 0
         self.turn = 0
         self.enable_steering = 0
         self.enable = 0
 
     def run(self):
         self.speed_cmd = 0
-        self.movement = 1
         self.turn = 0
         self.enable_steering = 1
         self.enable_speed = 1
 
         while True :
-	    MUT_mot_cons.acquire()
+
             global mot_cons
+            mot_cons.MUT.acquire()
             self.speed_cmd = mot_cons.sp
             self.turn = mot_cons.tr
-            MUT_mot_cons.release()
+            mot_cons.MUT.release()
 
-            """data = conn.recv(1024)
-
-            if not data: break
-
-            #for b in data:
-            #    print(b)
-
-            header = data[0:3]
-            payload = data[3:]
-            print("header :", header, "payload:", str(payload))
-
-            if (header == b'SPE'):  # speed
-                self.speed_cmd = int(payload)
-                print("speed is updated to ", self.speed_cmd)
-            elif (header == b'STE'):  # steering
-                if (payload == b'left'):
-                    self.turn = 1
-                    self.enable_steering = 1
-                    print("send cmd turn left")
-                elif (payload == b'right'):
-                    self.turn = -1
-                    self.enable_steering = 1
-                    print("send cmd turn right")
-                elif (payload == b'stop'):
-                    self.turn = 0
-                    self.enable_steering = 0
-                    print("send cmd stop to turn")
-            elif (header == b'MOV'):  # movement
-                if (payload == b'stop'):
-                    self.movement = 0
-                    self.enable_speed = 0
-                    print("send cmd movement stop")
-                elif (payload == b'forward'):
-                    print("send cmd movement forward")
-                    self.movement = 1
-                    self.enable_speed = 1
-                elif (payload == b'backward'):
-                    print("send cmd movement backward")
-                    self.movement = -1
-                    self.enable_speed = 1"""
-
-            print(self.speed_cmd)
-            print(self.movement)
-            print(self.enable)
-            print(self.turn)
-            print(self.enable_steering)
 
             if self.enable_speed:
                 cmd_mv = (50 + self.speed_cmd) | 0x80
@@ -149,9 +100,6 @@ class MyReceive(Thread):
 
             msg = can.Message(arbitration_id=MCM,data=[cmd_mv, cmd_mv, cmd_turn,0,0,0,0,0],extended_id=False)
 
-            #msg = can.Message(arbitration_id=0x010,data=[0xBC,0xBC,0x00, 0x00, 0x00, 0x00,0x00, 0x00],extended_id=False)
-            #msg = can.Message(arbitration_id=MCM,data=[0xBC,0xBC,0x00, 0x00, 0x00, 0x00,0x00, 0x00],extended_id=False)
-            #print(msg)
             try:
                 self.bus.send(msg)
                 print("Message sent")
@@ -166,10 +114,10 @@ class MySend(Thread):
         Thread.__init__(self)
         self.bus = bus
         
-        self.bat = 0
-        self.angle = 0
-        self.speed_left = 0
-        self.speed_right = 0
+        self.bat = 0.0
+        self.angle = 0.0
+        self.speed_left = 0.0
+        self.speed_right = 0.0
 
     def run(self):
         while True :
@@ -182,33 +130,34 @@ class MySend(Thread):
                 # position volant
                 self.angle = int(codecs.encode(msg.data[0:2],'hex'), 16)
                 # Niveau de la batterie
-                self.bat = int(codecs.encode(msg.data[2:4],'hex'), 16)            
+                
+                self.bat = ((int(codecs.encode(msg.data[2:4],'hex'), 16)*(3.3/0.20408))/4095)
                 # vitesse roue gauche
-                self.speed_left = int(codecs.encode(msg.data[4:6],'hex'), 16)
+                self.speed_left = int(codecs.encode(msg.data[4:6],'hex'), 16)/100
                 # vitesse roue droite
                 # header : SWR payload : entier, *0.01rpm
-                self.speed_right= int(codecs.encode(msg.data[6:8],'hex'), 16)
+                self.speed_right= int(codecs.encode(msg.data[6:8],'hex'), 16)/100
                 
                 print("angle: ",self.angle,";bat: ",self.bat,";sp-left: ",self.speed_left,"; sp-right: ",self.speed_right)
                 
-            MUT_mot_sens.acquire()
             global mot_sens
+            mot_sens.MUT.acquire()
             mot_sens.Bat_mes = self.bat
             mot_sens.Vol_mes = self.angle
             mot_sens.VMG_mes = self.speed_left
             mot_sens.VMD_mes = self.speed_right
-            MUT_mot_sens.release()
+            mot_sens.MUT.release()
     
 
 
 def callback(data):
     #rospy.loginfo(rospy.get_caller_id() + 'I heard %d', data.linear.x)
     print('I heard %d', data.linear.x)
-    MUT_mot_cons.acquire()
     global mot_cons
+    mot_cons.MUT.acquire()
     mot_cons.sp = int(data.linear.x)
     mot_cons.tr = int(data.angular.z)
-    MUT_mot_cons.release()
+    mot_cons.MUT.release()
     
 def listener():
 
@@ -237,10 +186,10 @@ class MyTalker(Thread):
         vect.layout.dim[0].stride = 4
         
         while not rospy.is_shutdown():
-            MUT_mot_sens.acquire()
             global mot_sens
+            mot_sens.MUT.acquire()
             vect.data = [mot_sens.Vol_mes, mot_sens.Bat_mes, mot_sens.VMG_mes, mot_sens.VMD_mes]    
-            MUT_mot_sens.release()
+            mot_sens.MUT.release()
             pub.publish(vect)
             rate.sleep()
 
@@ -250,9 +199,9 @@ class MCM_ROS:
     def __init__(self):
         self.sp = 0
         self.tr = 50
-
+        self.MUT = Lock()
 mot_cons = MCM_ROS()
-MUT_mot_cons = Lock()
+
 
 class MS_ROS:
     def __init__(self):
@@ -260,9 +209,10 @@ class MS_ROS:
         self.Bat_mes = 0   #Bytes 2-3
         self.VMG_mes = 0   #Bytes 4-5
         self.VMD_mes = 0   #Bytes 6-7
+        self.MUT = Lock()
 
 mot_sens = MS_ROS()
-MUT_mot_sens = Lock()
+
 
 if __name__ == '__main__':
     
