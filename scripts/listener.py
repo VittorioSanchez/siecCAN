@@ -70,12 +70,16 @@ class MyReceive(Thread):
         self.turn = 0
         self.enable_steering = 0
         self.enable = 0
+        self.cmd_MD = 0
+        self.cmd_MG = 0
 
     def run(self):
         self.speed_cmd = 0
         self.turn = 0
         self.enable_steering = 1
         self.enable_speed = 1
+        self.cmd_MD = 0
+        self.cmd_MG = 0
 
         while True :
 
@@ -84,21 +88,23 @@ class MyReceive(Thread):
             self.speed_cmd = mot_cons.sp
             self.turn = mot_cons.tr
             mot_cons.MUT.release()
-
+            self.cmd_MD, self.cmd_MG = asservissement(self.speed_cmd, self.speed_cmd)
+            self.turn = asservissement_dir(self.turn)
 
             if self.enable_speed:
-                cmd_mv = (50 + self.speed_cmd) | 0x80
+                cmd_mv_D = (50 + self.cmd_MD) | 0x80
+                cmd_mv_G = (50 + self.cmd_MG) | 0x80
             else:
                 cmd_mv = (50 + self.speed_cmd) & ~0x80
 
             if self.enable_steering:
-                cmd_turn = self.turn | 0x80
+                cmd_turn = (50 + self.turn) | 0x80
             else:
-                cmd_turn = self.turn & 0x80
+                cmd_turn = (50 + self.turn) & 0x80
 
-            print("mv:",(50 + self.speed_cmd),"turn:", self.turn)
+            print("mv:",(50 + self.speed_cmd),"turn:", cmd_turn)
 
-            msg = can.Message(arbitration_id=MCM,data=[cmd_mv, cmd_mv, cmd_turn,0,0,0,0,0],extended_id=False)
+            msg = can.Message(arbitration_id=MCM,data=[cmd_mv_D, cmd_mv_G, cmd_turn,0,0,0,0,0],extended_id=False)
 
             try:
                 self.bus.send(msg)
@@ -128,7 +134,7 @@ class MySend(Thread):
 
             if msg.arbitration_id == MS:
                 # position volant
-                self.angle = int(codecs.encode(msg.data[0:2],'hex'), 16)
+                self.angle = (int(codecs.encode(msg.data[0:2],'hex'), 16)-1831)/19.45
                 # Niveau de la batterie
                 
                 self.bat = ((int(codecs.encode(msg.data[2:4],'hex'), 16)*(3.3/0.20408))/4095)
@@ -148,7 +154,109 @@ class MySend(Thread):
             mot_sens.VMD_mes = self.speed_right
             mot_sens.MUT.release()
     
+def RPM_to_PWM_AV(RPM):
+    a = 0.431
+    b = 0
+    PWM=a*RPM+b
+    if PWM>50:
+        PWM=50
+    elif PWM<0:
+        PWM=0
+    return PWM
 
+def RPM_to_PWM_AR(RPM):
+    a = 0.431
+    b = 0
+    PWM=a*RPM+b
+    if PWM>0:
+        PWM=0
+    elif PWM<-50:
+        PWM=-50
+    return PWM
+
+kp=1         #Coefficient proportionnel
+ki=0           #Coefficient integrateur
+somme_erreurDroit = 0    # Somme des erreurs pour l'integrateur
+somme_erreurGauche = 0   # Somme des erreurs pour l'integrateur
+somme_erreurAngle = 0
+
+kp_d=1
+
+
+def asservissement(refDroit, refGauche):
+    global mot_sens
+    mot_sens.MUT.acquire()
+    global kp
+    global ki
+    vitesseG = mot_sens.VMG_mes * 0.01   #RPM
+    vitesseD = mot_sens.VMD_mes * 0.01   #RPM
+    mot_sens.MUT.release()
+    erreurDroit =refDroit-vitesseD
+    print(vitesseD)
+    erreurGauche =refGauche-vitesseG
+    print(erreurDroit)
+    global somme_erreurDroit
+    somme_erreurDroit = somme_erreurDroit + erreurDroit
+    global somme_erreurGauche
+    somme_erreurGauche = somme_erreurGauche + erreurGauche
+    
+    #PI : calcul de la commande
+    
+    cmdDroit_RPM = kp*erreurDroit + ki*somme_erreurDroit
+    cmdGauche_RPM = kp*erreurGauche + ki*somme_erreurGauche
+    if (refDroit > 0):
+        cmdDroit = int(RPM_to_PWM_AV(cmdDroit_RPM))
+        cmdGauche = int(RPM_to_PWM_AV(cmdGauche_RPM))
+    else:
+        cmdDroit = int(RPM_to_PWM_AR(cmdDroit_RPM))
+        cmdGauche = int(RPM_to_PWM_AR(cmdGauche_RPM))
+    
+    print(cmdDroit)
+    #global cmdGauche
+
+    
+    #MUT_cmdGauche.release()
+    return cmdDroit, cmdGauche 
+
+def RPM_to_PWM_T(RPM):
+    a = 0.5
+    b = 0
+    PWM=a*RPM+b
+    if PWM>50:
+        PWM=50
+    elif PWM<-50:
+        PWM=-50
+    return PWM
+
+
+
+
+def asservissement_dir(refAngle):
+    global mot_sens
+    mot_sens.MUT.acquire()
+    global kp
+    global ki
+    angle = mot_sens.Vol_mes  #angle
+    mot_sens.MUT.release()
+    erreurAngle =refAngle-angle
+    print(erreurAngle)
+    global somme_erreurAngle
+    somme_erreurAngle = somme_erreurAngle + erreurAngle
+    
+    #PI : calcul de la commande
+    
+    cmdAngle_RPM = kp_d*erreurAngle + ki*somme_erreurAngle
+    if (refAngle > 0):
+        cmdAngle = int(RPM_to_PWM_T(cmdAngle_RPM))
+    else:
+        cmdAngle = int(RPM_to_PWM_T(cmdAngle_RPM))
+    
+    print('asse: ',cmdAngle)
+    #global cmdGauche
+
+    
+    #MUT_cmdGauche.release()
+    return cmdAngle 
 
 def callback(data):
     #rospy.loginfo(rospy.get_caller_id() + 'I heard %d', data.linear.x)
@@ -158,6 +266,7 @@ def callback(data):
     mot_cons.sp = int(data.linear.x)
     mot_cons.tr = int(data.angular.z)
     mot_cons.MUT.release()
+
     
 def listener():
 
