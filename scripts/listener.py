@@ -80,6 +80,7 @@ class MyReceive(Thread):
         self.turn = 0
         self.enable_steering = 1
         self.enable_speed = 1
+        print('in rec')
 
         while True :
 	    MUT_mot_cons.acquire()
@@ -87,47 +88,6 @@ class MyReceive(Thread):
             self.speed_cmd = mot_cons.sp
             self.turn = mot_cons.tr
             MUT_mot_cons.release()
-
-            """data = conn.recv(1024)
-
-            if not data: break
-
-            #for b in data:
-            #    print(b)
-
-            header = data[0:3]
-            payload = data[3:]
-            print("header :", header, "payload:", str(payload))
-
-            if (header == b'SPE'):  # speed
-                self.speed_cmd = int(payload)
-                print("speed is updated to ", self.speed_cmd)
-            elif (header == b'STE'):  # steering
-                if (payload == b'left'):
-                    self.turn = 1
-                    self.enable_steering = 1
-                    print("send cmd turn left")
-                elif (payload == b'right'):
-                    self.turn = -1
-                    self.enable_steering = 1
-                    print("send cmd turn right")
-                elif (payload == b'stop'):
-                    self.turn = 0
-                    self.enable_steering = 0
-                    print("send cmd stop to turn")
-            elif (header == b'MOV'):  # movement
-                if (payload == b'stop'):
-                    self.movement = 0
-                    self.enable_speed = 0
-                    print("send cmd movement stop")
-                elif (payload == b'forward'):
-                    print("send cmd movement forward")
-                    self.movement = 1
-                    self.enable_speed = 1
-                elif (payload == b'backward'):
-                    print("send cmd movement backward")
-                    self.movement = -1
-                    self.enable_speed = 1"""
 
             print(self.speed_cmd)
             print(self.movement)
@@ -220,6 +180,19 @@ def listener():
     rospy.init_node('listener', anonymous=True)
 
     rospy.Subscriber('/cmd_vel', Twist, callback)
+    
+    
+def callback2(data):
+    #rospy.loginfo(rospy.get_caller_id() + 'I heard %d', data.linear.x)
+    print('I heard %d', data.data[0])
+    MUT_mot_cons.acquire()
+    global mot_cons
+    mot_cons.sp = int((data.data[1]+data.data[0])/2)
+    MUT_mot_cons.release()
+    
+def listener2():
+
+    rospy.Subscriber('/vitesse_asservie', Float32MultiArray, callback2)
  
 class MyTalker(Thread):
 
@@ -268,6 +241,7 @@ if __name__ == '__main__':
     
     
     listener()
+    listener2()
     #ifconfig can0 txqueuelen 1000
     print('Bring up CAN0....')
     #os.system("sudo /sbin/ip link set can0 up type can bitrate 400000")
