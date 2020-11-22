@@ -136,7 +136,6 @@ class MySend(Thread):
                 # position volant
                 self.angle = (int(codecs.encode(msg.data[0:2],'hex'), 16)-1831)/19.45
                 # Niveau de la batterie
-                
                 self.bat = ((int(codecs.encode(msg.data[2:4],'hex'), 16)*(3.3/0.20408))/4095)
                 # vitesse roue gauche
                 self.speed_left = int(codecs.encode(msg.data[4:6],'hex'), 16)/100
@@ -154,20 +153,28 @@ class MySend(Thread):
             mot_sens.VMD_mes = self.speed_right
             mot_sens.MUT.release()
     
-def RPM_to_PWM_AV(RPM):
+#conversion de la vitesse (en rpm) vers la commande à envoyer
+#Pour la marche avant
+def RPM_to_PWM_AV(RPM): 
     a = 0.431
     b = 0
     PWM=a*RPM+b
+    #fixation de seuils : 0<PWM<50 pour avancer
+    #attention un +50 est appliqué dans run, pour coller aux spec du moteur 
     if PWM>50:
         PWM=50
     elif PWM<0:
         PWM=0
     return PWM
 
+#conversion de la vitesse (en rpm) vers la commande à envoyer
+#Pour la marche arrière
 def RPM_to_PWM_AR(RPM):
     a = 0.431
     b = 0
     PWM=a*RPM+b
+    #fixation de seuils : -50<PWM<0 pour reculer
+    #attention un +50 est appliqué dans run, pour coller aux spec du moteur 
     if PWM>0:
         PWM=0
     elif PWM<-50:
@@ -175,16 +182,19 @@ def RPM_to_PWM_AR(RPM):
     return PWM
 
 kp=1         #Coefficient proportionnel
-ki=0           #Coefficient integrateur
+ki=0          #Coefficient integrateur
 somme_erreurDroit = 0    # Somme des erreurs pour l'integrateur
 somme_erreurGauche = 0   # Somme des erreurs pour l'integrateur
 somme_erreurAngle = 0
 
-kp_d=1
+kp_d=1      #Coefficient dérivateur
 
 
+#fonction d'asservissement des moteurs roues arrières
+#param refDroit et refGauche = ce qu'on veut en commande
+#return cmdDroit et cmdGauche = ce que l'on envoit à l'actionneur
 def asservissement(refDroit, refGauche):
-    global mot_sens
+    global mot_sens     #moteur sensor
     mot_sens.MUT.acquire()
     global kp
     global ki
@@ -218,6 +228,8 @@ def asservissement(refDroit, refGauche):
     #MUT_cmdGauche.release()
     return cmdDroit, cmdGauche 
 
+
+#Pour la direction des roues avant
 def RPM_to_PWM_T(RPM):
     a = 0.5
     b = 0
@@ -230,7 +242,9 @@ def RPM_to_PWM_T(RPM):
 
 
 
-
+#fonction d'asservissement des moteurs pour la direction des roues avant
+#param refAngle = l'angle voulu, entre -30 et 30° (A VERIFIER)
+#return cmdAngle = ce que l'on envoit à l'actionneur
 def asservissement_dir(refAngle):
     global mot_sens
     mot_sens.MUT.acquire()
@@ -251,12 +265,12 @@ def asservissement_dir(refAngle):
     else:
         cmdAngle = int(RPM_to_PWM_T(cmdAngle_RPM))
     
-    print('asse: ',cmdAngle)
-    #global cmdGauche
-
+    print('cmdAngle',cmdAngle)
     
-    #MUT_cmdGauche.release()
     return cmdAngle 
+
+
+
 
 def callback(data):
     #rospy.loginfo(rospy.get_caller_id() + 'I heard %d', data.linear.x)
@@ -314,10 +328,10 @@ mot_cons = MCM_ROS()
 
 class MS_ROS:
     def __init__(self):
-        self.Vol_mes = 0   #Bytes 0-1
-        self.Bat_mes = 0   #Bytes 2-3
-        self.VMG_mes = 0   #Bytes 4-5
-        self.VMD_mes = 0   #Bytes 6-7
+        self.Vol_mes = 0   #Bytes 0-1 / Steering Wheel Angle
+        self.Bat_mes = 0   #Bytes 2-3 / Battery Level
+        self.VMG_mes = 0   #Bytes 4-5 / Left Motor Speed
+        self.VMD_mes = 0   #Bytes 6-7 / Right Motor Speed
         self.MUT = Lock()
 
 mot_sens = MS_ROS()
