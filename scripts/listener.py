@@ -187,7 +187,7 @@ somme_erreurDroit = 0    # Somme des erreurs pour l'integrateur
 somme_erreurGauche = 0   # Somme des erreurs pour l'integrateur
 somme_erreurAngle = 0
 
-kp_d=1      #Coefficient dérivateur
+#kp_d=1      #Coefficient dérivateur
 
 
 #fonction d'asservissement des moteurs roues arrières
