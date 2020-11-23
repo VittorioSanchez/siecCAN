@@ -89,16 +89,17 @@ class MyReceive(Thread):
             self.turn = mot_cons.tr
             mot_cons.MUT.release()
             self.cmd_MD, self.cmd_MG = asservissement(self.speed_cmd, self.speed_cmd)
-            self.turn = asservissement_dir(self.turn)
+            self.cmd_turn = asservissement_dir(self.turn)
 
             if self.enable_speed:
                 cmd_mv_D = (50 + self.cmd_MD) | 0x80
                 cmd_mv_G = (50 + self.cmd_MG) | 0x80
             else:
-                cmd_mv = (50 + self.speed_cmd) & ~0x80
-
+                cmd_mv_D = (50 + self.speed_cmd) & ~0x80
+                cmd_mv_G = (50 + self.speed_cmd) & ~0x80
+                 
             if self.enable_steering:
-                cmd_turn = (50 + self.turn) | 0x80
+                cmd_turn = (50 + self.cmd_turn) | 0x80
             else:
                 cmd_turn = (50 + self.turn) & 0x80
 
@@ -187,7 +188,7 @@ somme_erreurDroit = 0    # Somme des erreurs pour l'integrateur
 somme_erreurGauche = 0   # Somme des erreurs pour l'integrateur
 somme_erreurAngle = 0
 
-#kp_d=1      #Coefficient dérivateur
+kp_d=1      #Coefficient proportionnel direction
 
 
 #fonction d'asservissement des moteurs roues arrières
@@ -230,10 +231,13 @@ def asservissement(refDroit, refGauche):
 
 
 #Pour la direction des roues avant
-def RPM_to_PWM_T(RPM):
-    a = 0.5
+#à droite à fond => 30°=> 100 en PWM de base => 50 en PWM recentrée en 0
+#à gauche à fond => -30°=> 0 en PWM de base => -50 en PWM recentrée en 0
+#tout droit => 0° => 50 en PWM de base => 0 en PWM recentrée en 0
+def Angle_to_PWM(Angle):
+    a = 1.6667
     b = 0
-    PWM=a*RPM+b
+    PWM=a*Angle+b
     if PWM>50:
         PWM=50
     elif PWM<-50:
@@ -250,20 +254,20 @@ def asservissement_dir(refAngle):
     mot_sens.MUT.acquire()
     global kp
     global ki
-    angle = mot_sens.Vol_mes  #angle
+    angle = mot_sens.Vol_mes  #angle retourné par le capteur (en degré)
     mot_sens.MUT.release()
     erreurAngle =refAngle-angle
     print(erreurAngle)
     global somme_erreurAngle
-    somme_erreurAngle = somme_erreurAngle + erreurAngle
+    somme_erreurAngle = somme_erreurAngle + erreurAngle #erreur intégrale
     
     #PI : calcul de la commande
     
-    cmdAngle_RPM = kp_d*erreurAngle + ki*somme_erreurAngle
-    if (refAngle > 0):
-        cmdAngle = int(RPM_to_PWM_T(cmdAngle_RPM))
-    else:
-        cmdAngle = int(RPM_to_PWM_T(cmdAngle_RPM))
+    cmdAngle_degre = kp_d*erreurAngle + ki*somme_erreurAngle
+    #if (refAngle > 0):
+    cmdAngle = int(Angle_to_PWM(cmdAngle_degre))
+    #else:
+    #    cmdAngle = int(Angle_to_PWM(cmdAngle_degre))
     
     print('cmdAngle',cmdAngle)
     
@@ -323,7 +327,8 @@ class MCM_ROS:
         self.sp = 0
         self.tr = 50
         self.MUT = Lock()
-mot_cons = MCM_ROS()
+        
+mot_cons = MCM_ROS() #mot_cons stands for "moteur consigne" (?)
 
 
 class MS_ROS:
@@ -334,7 +339,7 @@ class MS_ROS:
         self.VMD_mes = 0   #Bytes 6-7 / Right Motor Speed
         self.MUT = Lock()
 
-mot_sens = MS_ROS()
+mot_sens = MS_ROS() #mot_sens stands for "motor sensor"
 
 
 if __name__ == '__main__':
