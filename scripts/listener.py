@@ -31,10 +31,6 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 #
-# Revision $Id$
-
-## Simple talker demo that listens to std_msgs/Strings published 
-## to the 'chatter' topic
 
 import rospy
 
@@ -52,13 +48,32 @@ import codecs
 from ctypes import *
 
 
-MCM = 0x010
+CMC = 0x010
 MS = 0x100
 US1 = 0x000
 US2 = 0x001
 OM1 = 0x101
 OM2 = 0x102
 
+############### SHARED VARIABLES (mutex) ##################
+class CMC_ROS:
+    def __init__(self):
+        self.speed_cmd = 0
+        self.steering_cmd = 0
+        self.MUT = Lock()
+
+class MS_ROS:
+    def __init__(self):
+        self.steering_angle = 0  #Bytes 0-1 / Steering Wheel Angle
+        self.batt_level = 0      #Bytes 2-3 / Battery Level
+        self.motor_speed_L = 0   #Bytes 4-5 / Left Motor Speed
+        self.motor_speed_R = 0   #Bytes 6-7 / Right Motor Speed
+        self.MUT = Lock()
+
+MOTOR_COMMANDS = CMC_ROS()
+MOTOR_SENSORS = MS_ROS()
+
+###########################################################
 
 
 class MyReceive(Thread):
@@ -68,52 +83,52 @@ class MyReceive(Thread):
         self.bus  = can.interface.Bus(channel='can0', bustype='socketcan_native')
 
         self.speed_cmd = 0
-        self.turn = 0
+        self.steering_cmd = 0
         self.enable_steering = 0
-        self.enable = 0
-        self.cmd_MD = 0
-        self.cmd_MG = 0
+        self.enable_speed = 0
+        self.motor_cmd_R = 0
+        self.motor_cmd_L = 0
 
     def run(self):
         self.speed_cmd = 0
-        self.turn = 0
+        self.steering_cmd = 0
         self.enable_steering = 1
         self.enable_speed = 1
-        self.cmd_MD = 0
-        self.cmd_MG = 0
+        self.motor_cmd_R = 0
+        self.motor_cmd_L = 0
 
         while True :
 
-            global mot_cons
-            mot_cons.MUT.acquire()
-            self.speed_cmd = mot_cons.sp
-            self.turn = mot_cons.tr
-            mot_cons.MUT.release()
-            #self.cmd_turn = asservissement_dir(self.turn)
-            ##########avec asservissement###########
-            self.cmd_MD, self.cmd_MG = asservissement(self.speed_cmd, self.speed_cmd)
+            global MOTOR_COMMANDS
+            MOTOR_COMMANDS.MUT.acquire()
+            self.speed_cmd = MOTOR_COMMANDS.speed_cmd
+            self.steering_cmd = MOTOR_COMMANDS.steering_cmd
+            MOTOR_COMMANDS.MUT.release()
+            #self.steering_cmd = steering_PID(self.steering_cmd)
+            ########## with PID ###########
+            self.motor_cmd_R, self.motor_cmd_L = speed_PID(self.speed_cmd, self.speed_cmd)
             if self.enable_speed:
-                cmd_mv_D = (50 + self.cmd_MD) | 0x80
-                cmd_mv_G = (50 + self.cmd_MD) | 0x80
+                pwm_motor_R = (50 + self.motor_cmd_R) | 0x80
+                pwm_motor_L = (50 + self.motor_cmd_R) | 0x80
             ########################################
             
-            ##########sans asservissement###########
+            ########## without PID ###########
             #if self.enable_speed:
-            #    cmd_mv_D = (50 + self.speed_cmd) | 0x80
-            #    cmd_mv_G = (50 + self.speed_cmd) | 0x80
+            #    pwm_motor_R = (50 + self.speed_cmd) | 0x80
+            #    pwm_motor_L = (50 + self.speed_cmd) | 0x80
             ########################################
             else:
-                cmd_mv_D = (50 + self.cmd_MD) & ~0x80
-                cmd_mv_G = (50 + self.cmd_MG) & ~0x80
+                pwm_motor_R = (50 + self.motor_cmd_R) & ~0x80
+                pwm_motor_L = (50 + self.motor_cmd_L) & ~0x80
                  
             if self.enable_steering:
-                cmd_turn = (50 + self.turn) | 0x80
+                pwm_steering = (50 + self.steering_cmd) | 0x80
             else:
-                cmd_turn = (50 + self.turn) & 0x80
+                pwm_steering = (50 + self.steering_cmd) & 0x80
             
-            print("mv:",(50 + self.speed_cmd),"turn:", cmd_turn)
+            print("speed_pwm: ",(50 + self.speed_cmd),"steering_pwm: ", (50 + self.steering_cmd) )
 
-            msg = can.Message(arbitration_id=MCM,data=[cmd_mv_D, cmd_mv_G, cmd_turn,0,0,0,0,0],extended_id=False)
+            msg = can.Message(arbitration_id=CMC,data=[pwm_motor_R, pwm_motor_L, pwm_steering,0,0,0,0,0],extended_id=False)
 
             try:
                 self.bus.send(msg)
@@ -122,17 +137,18 @@ class MyReceive(Thread):
                 print("Message NOT sent")
             
             time.sleep(0.1)
-            
+
+
 class MySend(Thread):
 
     def __init__(self, bus):
         Thread.__init__(self)
         self.bus = bus
-        
-        self.bat = 0.0
-        self.angle = 0.0
-        self.speed_left = 0.0
-        self.speed_right = 0.0
+    
+        self.batt_level = 0.0
+        self.steering_angle = 0.0
+        self.motor_speed_L = 0.0
+        self.motor_speed_R = 0.0
 
     def run(self):
         while True :
@@ -142,144 +158,134 @@ class MySend(Thread):
             st = ""
 
             if msg.arbitration_id == MS:
-                # position volant
-                self.angle = (int(codecs.encode(msg.data[0:2],'hex'), 16)-1831)/19.45
-                # Niveau de la batterie
-                self.bat = ((int(codecs.encode(msg.data[2:4],'hex'), 16)*(3.3/0.20408))/4095)
-                # vitesse roue gauche
-                self.speed_left = int(codecs.encode(msg.data[4:6],'hex'), 16)*0.01
-                # vitesse roue droite
-                # header : SWR payload : entier, *0.01rpm
-                self.speed_right= int(codecs.encode(msg.data[6:8],'hex'), 16)*0.01
+                # Steering wheel angle
+                self.steering_angle = (int(codecs.encode(msg.data[0:2],'hex'), 16)-1831)/19.45
+                # Battery level
+                self.batt_level = ((int(codecs.encode(msg.data[2:4],'hex'), 16)*(3.3/0.20408))/4095)
+                # Left wheel speed
+                self.motor_speed_L = int(codecs.encode(msg.data[4:6],'hex'), 16)*0.01
+                # Right wheel speed
+                # header : SWR payload : integer, *0.01rpm
+                self.motor_speed_R= int(codecs.encode(msg.data[6:8],'hex'), 16)*0.01
                 
-                print("angle: ",self.angle,";bat: ",self.bat,";sp-left: ",self.speed_left,"; sp-right: ",self.speed_right)
+                #print("steering_angle: ",self.steering_angle,"; batt_level: ",self.batt_level,"; left_speed: ",self.motor_speed_L,"; right_speed: ",self.motor_speed_R)
                 
-            global mot_sens
-            mot_sens.MUT.acquire()
-            mot_sens.Bat_mes = self.bat
-            mot_sens.Vol_mes = self.angle
-            mot_sens.VMG_mes = self.speed_left
-            mot_sens.VMD_mes = self.speed_right
-            mot_sens.MUT.release()
+            global MOTOR_SENSORS
+            MOTOR_SENSORS.MUT.acquire()
+            MOTOR_SENSORS.batt_level = self.batt_level
+            MOTOR_SENSORS.steering_angle = self.steering_angle
+            MOTOR_SENSORS.motor_speed_L = self.motor_speed_L
+            MOTOR_SENSORS.motor_speed_R = self.motor_speed_R
+            MOTOR_SENSORS.MUT.release()
     
-#conversion de la vitesse (en rpm) vers la commande a envoyer
-#Pour la marche avant
-def RPM_to_PWM_AV(RPM): 
+#Converts RPM to the PWM corresponding value
+#For the forward mode:
+def RPM_to_PWM_forward(RPM): 
     a = 0.431
     b = 0
     PWM=a*RPM+b
-    #fixation de seuils : 0<PWM<50 pour avancer
-    #attention un +50 est applique dans run, pour coller aux spec du moteur 
+    # Treshold : 0<PWM<50 to go forward
+    # Careful, +50 is applied in MyReceive.run() because 50 is the neutral position 
     if PWM>50:
         PWM=50
     elif PWM<=0:
         PWM=0
     return PWM
 
-#conversion de la vitesse (en rpm) vers la commande a envoyer
-#Pour la marche arriere
-def RPM_to_PWM_AR(RPM):
+#For the backwards mode:
+def RPM_to_PWM_backward(RPM):
     a = 0.431
     b = 0
     PWM=a*RPM+b
-    #fixation de seuils : -50<PWM<0 pour reculer
-    #attention un +50 est applique dans run, pour coller aux spec du moteur 
+    # Treshold : -50<PWM<0 to go backward
     if PWM>=0:
         PWM=0
     elif PWM<-50:
         PWM=-50
     return PWM
 
-kp=0.5       #Coefficient proportionnel
-ki=40.0      #Coefficient integrateur
-kd=0     #Coefficient derivateur
-somme_erreurDroit = 0    # Somme des erreurs pour l'integrateur
-somme_erreurGauche = 0   # Somme des erreurs pour l'integrateur
-somme_erreurAngle = 0
 
-kp_d=1      #Coefficient proportionnel direction
+sum_rightError = 0    # Sum of the errors for the integral correction
+sum_leftError = 0  
+sum_angleError = 0
+rightRef_old = 0
+leftRef_old = 0
+time_old = 0
+rightError_old = 0
+leftError_old = 0
 
-refDroit_old =0
-refGauche_old =0
-time_old_value=0
-erreurDroit_old=0
-erreurGauche_old=0
-#fonction d'asservissement des moteurs roues arrieres
-#param refDroit et refGauche = ce qu'on veut en commande
-#return cmdDroit et cmdGauche = ce que l'on envoit a l'actionneur
-def asservissement(refDroit, refGauche):
-    time_actual_value=time.clock()
-    global time_old_value
-    delta_t=time_actual_value-time_old_value
-    print("delta temps " ,delta_t)
-    time_old_value=time_actual_value
-    print("Ref droit ",refDroit)
-    global mot_sens     #moteur sensor
-    mot_sens.MUT.acquire()
-    global kp
-    global ki
-    global kd
-    vitesseG = float(mot_sens.VMG_mes)    #RPM
-    vitesseD = float(mot_sens.VMD_mes)    #RPM
-    mot_sens.MUT.release()
-    erreurDroit = refDroit-vitesseD
-    erreurGauche =refGauche-vitesseG
-    print("Erreur droit ", erreurDroit)
-    global somme_erreurDroit
-    global somme_erreurGauche
-    global erreurDroit_old
-    global erreurGauche_old
-    global refDroit_old
-    global refGauche_old
-    if(refDroit_old != refDroit or refGauche_old != refGauche):
-        refDroit_old=refDroit
-        refGauche_old=refGauche
-        somme_erreurDroit=0
-        somme_erreurGauche=0
+# PID to control car's speed
+# param rightRef, leftRef = value that we want
+# return cmdRight, cmdLeft = value to send to the motors (PWM)
+def speed_PID(rightRef, leftRef):
+    global sum_rightError, sum_leftError
+    global rightError_old, leftError_old
+    global rightRef_old, leftRef_old
+    global time_old
+    global MOTOR_SENSORS
+    kp=0.5       #Proportional coefficient
+    ki=40.0      #Integral coefficient
+    kd=0         #Derivative coefficient
+    
+    time_new = time.clock()    
+    delta_t = time_new - time_old
+    time_old = time_new
+    #print("delta time " ,delta_t) 
+    #print("Right ref ",rightRef) 
+    MOTOR_SENSORS.MUT.acquire()
+    L_speed = float(MOTOR_SENSORS.motor_speed_L)    #RPM
+    R_speed = float(MOTOR_SENSORS.motor_speed_R)    #RPM
+    MOTOR_SENSORS.MUT.release()
+    
+    rightError = rightRef - R_speed
+    leftError = leftRef - L_speed
+    #print("Right error ", rightError)    
+    # I calculation, it resets if we change the reference
+    if(rightRef_old != rightRef or leftRef_old != leftRef):
+        rightRef_old = rightRef
+        leftRef_old = leftRef
+        sum_rightError = 0
+        I_right = 0
+        sum_leftError = 0
+        I_left = 0
     else:
-        somme_erreurDroit = somme_erreurDroit + ki*erreurDroit*delta_t
-        print("Somme erreur droit ",somme_erreurDroit)
-        somme_erreurGauche = somme_erreurGauche + ki*erreurGauche*delta_t
-    delta_erreurDroit=erreurDroit-erreurDroit_old
-    delta_erreurGauche=erreurGauche-erreurGauche_old
-    
-    #PI : calcul de la commande
-    P_Droit=kp*erreurDroit
-    P_Gauche=kp*erreurGauche
-    I_Droit=somme_erreurDroit
-    I_Gauche=somme_erreurGauche
-    D_Droit=(kd*delta_erreurDroit)/(delta_t)
-    D_Gauche=(kd*delta_erreurGauche)/(delta_t)
-
-    erreurDroit_old=erreurDroit
-    erreurGauche_old=erreurGauche
-    
-    cmdDroit_RPM = P_Droit + I_Droit + D_Droit
-    cmdGauche_RPM = P_Gauche + I_Gauche + D_Gauche
-    if (refDroit > 0):
-        cmdDroit = int(RPM_to_PWM_AV(cmdDroit_RPM))
-        cmdGauche = int(RPM_to_PWM_AV(cmdGauche_RPM))
-    elif (refDroit < 0):
-        cmdDroit = int(RPM_to_PWM_AR(cmdDroit_RPM))
-        cmdGauche = int(RPM_to_PWM_AR(cmdGauche_RPM))
-    elif(refDroit == 0):
-        cmdDroit = 0
-        cmdGauche = 0
+        I_right = sum_rightError + (ki * rightError * delta_t)
+        print("Sum right error ",sum_rightError)
+        I_left = sum_leftError + (ki * leftError * delta_t)
         
-            
+    delta_rightError = rightError - rightError_old
+    delta_leftError = leftError - leftError_old
     
-    print(cmdDroit)
-    #global cmdGauche
+    # P and D calculation
+    P_right = kp * rightError
+    P_left = kp * leftError
+    D_right = (kd * delta_rightError) / (delta_t)
+    D_left = (kd * delta_leftError) / (delta_t)
 
+    rightError_old = rightError
+    leftError_old = leftError
     
-    #MUT_cmdGauche.release()
-    return cmdDroit, cmdGauche 
+    cmdRight_RPM = P_right + I_right + D_right
+    cmdLeft_RPM = P_left + I_left + D_left
+    
+    # Conversion RPM to PWM
+    if (rightRef > 0):
+        cmdRight = int(RPM_to_PWM_forward(cmdRight_RPM))
+        cmdLeft = int(RPM_to_PWM_forward(cmdLeft_RPM))
+    elif (rightRef < 0):
+        cmdRight = int(RPM_to_PWM_backward(cmdRight_RPM))
+        cmdLeft = int(RPM_to_PWM_backward(cmdLeft_RPM))
+    elif(rightRef == 0):
+        cmdRight = 0
+        cmdLeft = 0
+    #print(cmdRight)
+       
+    return cmdRight, cmdLeft 
 
-
-#Pour la direction des roues avant
-#a droite a fond => 30deg=> 100 en PWM de base => 50 en PWM recentree en 0
-#a gauche a fond => -30deg=> 0 en PWM de base => -50 en PWM recentree en 0
-#tout droit => 0deg => 50 en PWM de base => 0 en PWM recentree en 0
+# For the front wheels direction:
+# max to the right => 30deg => PWM of 100 => 50 for PWM centered in 0
+# max to the left => -30deg => PWM of 0 => -50 for PWM centered in 0
+# straight => 0deg => PWM of 50 => 0 for PWM centered in 0
 def Angle_to_PWM(Angle):
     a = 1.6667
     b = 0
@@ -291,25 +297,24 @@ def Angle_to_PWM(Angle):
     return PWM
 
 
-
-#fonction d'asservissement des moteurs pour la direction des roues avant
-#param refAngle = l'angle voulu, entre -30 et 30deg (A VERIFIER)
-#return cmdAngle = ce que l'on envoit a l'actionneur
-def asservissement_dir(refAngle):
-    global mot_sens
-    mot_sens.MUT.acquire()
-    global kp
-    global ki
-    angle = mot_sens.Vol_mes  #angle retourne par le capteur (en degre)
-    mot_sens.MUT.release()
-    erreurAngle =refAngle-angle
-    print(erreurAngle)
-    global somme_erreurAngle
-    somme_erreurAngle = somme_erreurAngle + erreurAngle #erreur integrale
+# PID to control car's steering wheel (so the direction)
+# param refAngle = desired angle, between -30 et 30deg (TO CHECK !!!)
+# return cmdAngle = PWM that we send to the motor
+def steering_PID(refAngle):
+    global MOTOR_SENSORS
+    MOTOR_SENSORS.MUT.acquire()
+    kp = 0
+    ki = 0
+    angle = MOTOR_SENSORS.steering_angle  # angle given by the sensor (in degrees)
+    MOTOR_SENSORS.MUT.release()
+    angleError =refAngle-angle
+    print(angleError)
+    global sum_angleError
+    sum_angleError = sum_angleError + angleError # Integral error
     
-    #PI : calcul de la commande
+    # PI : command calculation
     
-    cmdAngle_degre = kp_d*erreurAngle + ki*somme_erreurAngle
+    cmdAngle_degre = kp*angleError + ki*sum_angleError
     #if (refAngle > 0):
     cmdAngle = int(Angle_to_PWM(cmdAngle_degre))
     #else:
@@ -320,36 +325,34 @@ def asservissement_dir(refAngle):
     return cmdAngle 
 
 
-
-
-def callback(data):
+def callback_motor_cmd(data):
     #rospy.loginfo(rospy.get_caller_id() + 'I heard %d', data.linear.x)
     print('I heard %d', data.linear.x)
-    global mot_cons
-    mot_cons.MUT.acquire()
-    mot_cons.sp = int(data.linear.x)
-    mot_cons.tr = int(data.angular.z)
-    mot_cons.MUT.release()
+    global MOTOR_COMMANDS
+    MOTOR_COMMANDS.MUT.acquire()
+    MOTOR_COMMANDS.speed_cmd = int(data.linear.x)
+    MOTOR_COMMANDS.steering_cmd = int(data.angular.z)
+    MOTOR_COMMANDS.MUT.release()
 
     
 def listener():
-
     # In ROS, nodes are uniquely named. If two nodes with the same
     # name are launched, the previous one is kicked off. The
     # anonymous=True flag means that rospy will choose a unique
     # name for our 'listener' node so that multiple listeners can
     # run simultaneously.
     rospy.init_node('listener', anonymous=True)
+    rospy.Subscriber('/speed_cmd', Twist, callback_motor_cmd)
 
-    rospy.Subscriber('/cmd_vel', Twist, callback)
- 
+
 class MyTalker(Thread):
 
     def __init__(self):
         Thread.__init__(self)
 
     def run(self):
-        pub = rospy.Publisher('/mot_sens', Float32MultiArray, queue_size=10)
+        global MOTOR_SENSORS
+        pub = rospy.Publisher('/motor_sensors', Float32MultiArray, queue_size=10)
         #rospy.init_node('talker', anonymous=True)
         rate = rospy.Rate(10) # 10hz
         vect = Float32MultiArray()
@@ -358,41 +361,17 @@ class MyTalker(Thread):
         vect.layout.dim[0].size = 4
         vect.layout.dim[0].stride = 4
         
-        while not rospy.is_shutdown():
-            global mot_sens
-            mot_sens.MUT.acquire()
-            vect.data = [mot_sens.Vol_mes, mot_sens.Bat_mes, mot_sens.VMG_mes, mot_sens.VMD_mes]    
-            mot_sens.MUT.release()
+        while not rospy.is_shutdown():            
+            MOTOR_SENSORS.MUT.acquire()
+            vect.data = [MOTOR_SENSORS.steering_angle, MOTOR_SENSORS.batt_level, MOTOR_SENSORS.motor_speed_L, MOTOR_SENSORS.motor_speed_R]    
+            MOTOR_SENSORS.MUT.release()
             pub.publish(vect)
             rate.sleep()
-
-
-
-class MCM_ROS:
-    def __init__(self):
-        self.sp = 0
-        self.tr = 50
-        self.MUT = Lock()
-        
-mot_cons = MCM_ROS() #mot_cons stands for "moteur consigne" (?)
-
-
-class MS_ROS:
-    def __init__(self):
-        self.Vol_mes = 0   #Bytes 0-1 / Steering Wheel Angle
-        self.Bat_mes = 0   #Bytes 2-3 / Battery Level
-        self.VMG_mes = 0   #Bytes 4-5 / Left Motor Speed
-        self.VMD_mes = 0   #Bytes 6-7 / Right Motor Speed
-        self.MUT = Lock()
-
-mot_sens = MS_ROS() #mot_sens stands for "motor sensor"
-
+            
 
 if __name__ == '__main__':
-    
-    
+       
     listener()
-    #ifconfig can0 txqueuelen 1000
     print('Bring up CAN0....')
     #os.system("sudo /sbin/ip link set can0 up type can bitrate 400000")
     time.sleep(0.1)
@@ -411,7 +390,6 @@ if __name__ == '__main__':
     newrostalker = MyTalker()
     newrostalker.start()
     #newthread.join()
-
     
     # spin() simply keeps python from exiting until this node is stopped
     rospy.spin()

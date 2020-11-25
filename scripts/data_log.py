@@ -1,4 +1,11 @@
 #!/usr/bin/env python
+"""
+Simple script to export ROS data and time to files in order to process it after with Excel (graphs...).
+The created files are "data_file.txt" and "time.txt".
+Change the topic you want to suscribe in listener().
+Be careful to choose the right data in the callback function. It's only one value per data file.
+If you want to record various type of data at the same time, you need to create a file for each type of data.
+"""
 import csv
 import rospy
 import time
@@ -9,29 +16,22 @@ temps=[]
 i=0
 data_file = open('data_file.txt', mode='w')
 time_file = open('time.txt', mode='w')
-data_writer = csv.writer(data_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
     
 def callback(data):
-    #rospy.loginfo(rospy.get_caller_id() + 'I heard %d', data.linear.x)
-    global i
+    global i      # i is used to close properly the files after a the defined delay, here 10000 callbacks (it corresponds to something like 10s, it's not precise)
     if i<10000:
         i=i+1
         print(i)
         print('Time : ', 100*time.clock())
-        #valeur.append(data.data[3])
-        #data_writer.writerow([data.data[3]])
         data_file.write("{}\n".format(data.data[3]))
         time_file.write("{}\n".format(time.clock()))
     else:
         data_file.close()
         time_file.close()
-    
-
-    
+     
     
 def listener():
     rospy.init_node('listener2', anonymous=True)
-
     rospy.Subscriber('/mot_sens', Float32MultiArray, callback)
     
 if __name__ == '__main__':    
