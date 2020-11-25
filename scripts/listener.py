@@ -51,6 +51,7 @@ import struct
 import codecs
 from ctypes import *
 
+
 MCM = 0x010
 MS = 0x100
 US1 = 0x000
@@ -88,21 +89,28 @@ class MyReceive(Thread):
             self.speed_cmd = mot_cons.sp
             self.turn = mot_cons.tr
             mot_cons.MUT.release()
+            #self.cmd_turn = asservissement_dir(self.turn)
+            ##########avec asservissement###########
             self.cmd_MD, self.cmd_MG = asservissement(self.speed_cmd, self.speed_cmd)
-            self.cmd_turn = asservissement_dir(self.turn)
-
             if self.enable_speed:
                 cmd_mv_D = (50 + self.cmd_MD) | 0x80
-                cmd_mv_G = (50 + self.cmd_MG) | 0x80
+                cmd_mv_G = (50 + self.cmd_MD) | 0x80
+            ########################################
+            
+            ##########sans asservissement###########
+            #if self.enable_speed:
+            #    cmd_mv_D = (50 + self.speed_cmd) | 0x80
+            #    cmd_mv_G = (50 + self.speed_cmd) | 0x80
+            ########################################
             else:
-                cmd_mv_D = (50 + self.speed_cmd) & ~0x80
-                cmd_mv_G = (50 + self.speed_cmd) & ~0x80
+                cmd_mv_D = (50 + self.cmd_MD) & ~0x80
+                cmd_mv_G = (50 + self.cmd_MG) & ~0x80
                  
             if self.enable_steering:
-                cmd_turn = (50 + self.cmd_turn) | 0x80
+                cmd_turn = (50 + self.turn) | 0x80
             else:
                 cmd_turn = (50 + self.turn) & 0x80
-
+            
             print("mv:",(50 + self.speed_cmd),"turn:", cmd_turn)
 
             msg = can.Message(arbitration_id=MCM,data=[cmd_mv_D, cmd_mv_G, cmd_turn,0,0,0,0,0],extended_id=False)
@@ -139,10 +147,10 @@ class MySend(Thread):
                 # Niveau de la batterie
                 self.bat = ((int(codecs.encode(msg.data[2:4],'hex'), 16)*(3.3/0.20408))/4095)
                 # vitesse roue gauche
-                self.speed_left = int(codecs.encode(msg.data[4:6],'hex'), 16)/100
+                self.speed_left = int(codecs.encode(msg.data[4:6],'hex'), 16)*0.01
                 # vitesse roue droite
                 # header : SWR payload : entier, *0.01rpm
-                self.speed_right= int(codecs.encode(msg.data[6:8],'hex'), 16)/100
+                self.speed_right= int(codecs.encode(msg.data[6:8],'hex'), 16)*0.01
                 
                 print("angle: ",self.angle,";bat: ",self.bat,";sp-left: ",self.speed_left,"; sp-right: ",self.speed_right)
                 
@@ -154,73 +162,111 @@ class MySend(Thread):
             mot_sens.VMD_mes = self.speed_right
             mot_sens.MUT.release()
     
-#conversion de la vitesse (en rpm) vers la commande à envoyer
+#conversion de la vitesse (en rpm) vers la commande a envoyer
 #Pour la marche avant
 def RPM_to_PWM_AV(RPM): 
     a = 0.431
     b = 0
     PWM=a*RPM+b
     #fixation de seuils : 0<PWM<50 pour avancer
-    #attention un +50 est appliqué dans run, pour coller aux spec du moteur 
+    #attention un +50 est applique dans run, pour coller aux spec du moteur 
     if PWM>50:
         PWM=50
-    elif PWM<0:
+    elif PWM<=0:
         PWM=0
     return PWM
 
-#conversion de la vitesse (en rpm) vers la commande à envoyer
-#Pour la marche arrière
+#conversion de la vitesse (en rpm) vers la commande a envoyer
+#Pour la marche arriere
 def RPM_to_PWM_AR(RPM):
     a = 0.431
     b = 0
     PWM=a*RPM+b
     #fixation de seuils : -50<PWM<0 pour reculer
-    #attention un +50 est appliqué dans run, pour coller aux spec du moteur 
-    if PWM>0:
+    #attention un +50 est applique dans run, pour coller aux spec du moteur 
+    if PWM>=0:
         PWM=0
     elif PWM<-50:
         PWM=-50
     return PWM
 
-kp=1         #Coefficient proportionnel
-ki=0          #Coefficient integrateur
+kp=0.5       #Coefficient proportionnel
+ki=40.0      #Coefficient integrateur
+kd=0     #Coefficient derivateur
 somme_erreurDroit = 0    # Somme des erreurs pour l'integrateur
 somme_erreurGauche = 0   # Somme des erreurs pour l'integrateur
 somme_erreurAngle = 0
 
 kp_d=1      #Coefficient proportionnel direction
 
-
-#fonction d'asservissement des moteurs roues arrières
+refDroit_old =0
+refGauche_old =0
+time_old_value=0
+erreurDroit_old=0
+erreurGauche_old=0
+#fonction d'asservissement des moteurs roues arrieres
 #param refDroit et refGauche = ce qu'on veut en commande
-#return cmdDroit et cmdGauche = ce que l'on envoit à l'actionneur
+#return cmdDroit et cmdGauche = ce que l'on envoit a l'actionneur
 def asservissement(refDroit, refGauche):
+    time_actual_value=time.clock()
+    global time_old_value
+    delta_t=time_actual_value-time_old_value
+    print("delta temps " ,delta_t)
+    time_old_value=time_actual_value
+    print("Ref droit ",refDroit)
     global mot_sens     #moteur sensor
     mot_sens.MUT.acquire()
     global kp
     global ki
-    vitesseG = mot_sens.VMG_mes * 0.01   #RPM
-    vitesseD = mot_sens.VMD_mes * 0.01   #RPM
+    global kd
+    vitesseG = float(mot_sens.VMG_mes)    #RPM
+    vitesseD = float(mot_sens.VMD_mes)    #RPM
     mot_sens.MUT.release()
-    erreurDroit =refDroit-vitesseD
-    print(vitesseD)
+    erreurDroit = refDroit-vitesseD
     erreurGauche =refGauche-vitesseG
-    print(erreurDroit)
+    print("Erreur droit ", erreurDroit)
     global somme_erreurDroit
-    somme_erreurDroit = somme_erreurDroit + erreurDroit
     global somme_erreurGauche
-    somme_erreurGauche = somme_erreurGauche + erreurGauche
+    global erreurDroit_old
+    global erreurGauche_old
+    global refDroit_old
+    global refGauche_old
+    if(refDroit_old != refDroit or refGauche_old != refGauche):
+        refDroit_old=refDroit
+        refGauche_old=refGauche
+        somme_erreurDroit=0
+        somme_erreurGauche=0
+    else:
+        somme_erreurDroit = somme_erreurDroit + ki*erreurDroit*delta_t
+        print("Somme erreur droit ",somme_erreurDroit)
+        somme_erreurGauche = somme_erreurGauche + ki*erreurGauche*delta_t
+    delta_erreurDroit=erreurDroit-erreurDroit_old
+    delta_erreurGauche=erreurGauche-erreurGauche_old
     
     #PI : calcul de la commande
+    P_Droit=kp*erreurDroit
+    P_Gauche=kp*erreurGauche
+    I_Droit=somme_erreurDroit
+    I_Gauche=somme_erreurGauche
+    D_Droit=(kd*delta_erreurDroit)/(delta_t)
+    D_Gauche=(kd*delta_erreurGauche)/(delta_t)
+
+    erreurDroit_old=erreurDroit
+    erreurGauche_old=erreurGauche
     
-    cmdDroit_RPM = kp*erreurDroit + ki*somme_erreurDroit
-    cmdGauche_RPM = kp*erreurGauche + ki*somme_erreurGauche
+    cmdDroit_RPM = P_Droit + I_Droit + D_Droit
+    cmdGauche_RPM = P_Gauche + I_Gauche + D_Gauche
     if (refDroit > 0):
         cmdDroit = int(RPM_to_PWM_AV(cmdDroit_RPM))
         cmdGauche = int(RPM_to_PWM_AV(cmdGauche_RPM))
-    else:
+    elif (refDroit < 0):
         cmdDroit = int(RPM_to_PWM_AR(cmdDroit_RPM))
         cmdGauche = int(RPM_to_PWM_AR(cmdGauche_RPM))
+    elif(refDroit == 0):
+        cmdDroit = 0
+        cmdGauche = 0
+        
+            
     
     print(cmdDroit)
     #global cmdGauche
@@ -231,9 +277,9 @@ def asservissement(refDroit, refGauche):
 
 
 #Pour la direction des roues avant
-#à droite à fond => 30°=> 100 en PWM de base => 50 en PWM recentrée en 0
-#à gauche à fond => -30°=> 0 en PWM de base => -50 en PWM recentrée en 0
-#tout droit => 0° => 50 en PWM de base => 0 en PWM recentrée en 0
+#a droite a fond => 30deg=> 100 en PWM de base => 50 en PWM recentree en 0
+#a gauche a fond => -30deg=> 0 en PWM de base => -50 en PWM recentree en 0
+#tout droit => 0deg => 50 en PWM de base => 0 en PWM recentree en 0
 def Angle_to_PWM(Angle):
     a = 1.6667
     b = 0
@@ -247,19 +293,19 @@ def Angle_to_PWM(Angle):
 
 
 #fonction d'asservissement des moteurs pour la direction des roues avant
-#param refAngle = l'angle voulu, entre -30 et 30° (A VERIFIER)
-#return cmdAngle = ce que l'on envoit à l'actionneur
+#param refAngle = l'angle voulu, entre -30 et 30deg (A VERIFIER)
+#return cmdAngle = ce que l'on envoit a l'actionneur
 def asservissement_dir(refAngle):
     global mot_sens
     mot_sens.MUT.acquire()
     global kp
     global ki
-    angle = mot_sens.Vol_mes  #angle retourné par le capteur (en degré)
+    angle = mot_sens.Vol_mes  #angle retourne par le capteur (en degre)
     mot_sens.MUT.release()
     erreurAngle =refAngle-angle
     print(erreurAngle)
     global somme_erreurAngle
-    somme_erreurAngle = somme_erreurAngle + erreurAngle #erreur intégrale
+    somme_erreurAngle = somme_erreurAngle + erreurAngle #erreur integrale
     
     #PI : calcul de la commande
     
