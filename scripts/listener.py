@@ -34,6 +34,7 @@
 
 import rospy
 
+from std_msgs.msg import UInt8
 from std_msgs.msg import String
 from geometry_msgs.msg import Twist 
 from std_msgs.msg import Float32MultiArray
@@ -68,6 +69,7 @@ class MS_ROS:
         self.batt_level = 0      #Bytes 2-3 / Battery Level
         self.motor_speed_L = 0   #Bytes 4-5 / Left Motor Speed
         self.motor_speed_R = 0   #Bytes 6-7 / Right Motor Speed
+        self.drive_enabled = 1
         self.MUT = Lock()
 
 MOTOR_COMMANDS = CMC_ROS()
@@ -330,8 +332,47 @@ def callback_motor_cmd(data):
     print('I heard %d', data.linear.x)
     global MOTOR_COMMANDS
     MOTOR_COMMANDS.MUT.acquire()
-    MOTOR_COMMANDS.speed_cmd = int(data.linear.x)
-    MOTOR_COMMANDS.steering_cmd = int(data.angular.z)
+    if(MOTOR_COMMANDS.drive_enabled == 1):
+        MOTOR_COMMANDS.speed_cmd = int(data.linear.x)
+        MOTOR_COMMANDS.steering_cmd = int(data.angular.z)
+    else:
+        print('Driving is not allowed because of object detection')
+    MOTOR_COMMANDS.MUT.release()
+
+#function that return the object name regarding the ROS number that was read on the ROS topic
+def ROS_number_to_Detection(class_number):
+    if class_number == 0: #Nothing
+        return "nothing"
+    elif class_number == 1: #Person 
+        return "person"
+    elif class_number == 2: #Baggage 
+        return "baggage"
+    elif class_number == 3: #Bus
+        return "bus"
+    elif class_number == 4: #Car
+        return "car"
+    elif class_number == 5: #Bicycle
+        return "bicycle"
+    elif class_number == 6: #Cat
+        return "cat"
+    elif class_number == 7: #Dog
+        return "dog"
+    elif class_number == 8: #Motorcycle
+        return "motorcycle"
+
+    
+def callback_detection(data):
+    #rospy.loginfo(rospy.get_caller_id() + 'I heard %d', data.linear.x)
+    print('I heard there is: ', ROS_number_to_Detection(data))
+    global MOTOR_COMMANDS
+    
+    MOTOR_COMMANDS.MUT.acquire()
+    if (data == 0): #if nothing is detected
+        MOTOR_COMMAND.drive_enabled = 1
+        
+    else: #if anything is detected
+        MOTOR_COMMANDS.speed_cmd = 0
+        MOTOR_COMMAND.drive_enabled = 0
     MOTOR_COMMANDS.MUT.release()
 
     
@@ -343,6 +384,7 @@ def listener():
     # run simultaneously.
     rospy.init_node('listener', anonymous=True)
     rospy.Subscriber('/speed_cmd', Twist, callback_motor_cmd)
+    rospy.Subscriber('/detection', UInt8, callback_detection)
 
 
 class MyTalker(Thread):
@@ -393,3 +435,4 @@ if __name__ == '__main__':
     
     # spin() simply keeps python from exiting until this node is stopped
     rospy.spin()
+
