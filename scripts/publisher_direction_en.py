@@ -13,7 +13,7 @@ def talker():
     while not rospy.is_shutdown():
         
         #move_cmd = Twist()
-        move_cmd.angular.z = input("Valeur vitesse angulaire (float): ")
+        move_cmd.angular.x = input("Valeur vitesse angulaire (float): ")
         #rospy.loginfo(hello_str)
         pub.publish(move_cmd)
         rate.sleep()

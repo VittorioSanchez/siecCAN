@@ -61,6 +61,7 @@ class CMC_ROS:
     def __init__(self):
         self.speed_cmd = 0
         self.steering_cmd = 0
+        self.drive_enabled = 1
         self.MUT = Lock()
 
 class MS_ROS:
@@ -69,7 +70,6 @@ class MS_ROS:
         self.batt_level = 0      #Bytes 2-3 / Battery Level
         self.motor_speed_L = 0   #Bytes 4-5 / Left Motor Speed
         self.motor_speed_R = 0   #Bytes 6-7 / Right Motor Speed
-        self.drive_enabled = 1
         self.MUT = Lock()
 
 MOTOR_COMMANDS = CMC_ROS()
@@ -111,7 +111,7 @@ class MyReceive(Thread):
             self.motor_cmd_R, self.motor_cmd_L = speed_PID(self.speed_cmd, self.speed_cmd)
             if self.enable_speed:
                 pwm_motor_R = (50 + self.motor_cmd_R) | 0x80
-                pwm_motor_L = (50 + self.motor_cmd_R) | 0x80
+                pwm_motor_L = (50 + self.motor_cmd_L) | 0x80
             ########################################
             
             ########## without PID ###########
@@ -126,11 +126,11 @@ class MyReceive(Thread):
             if self.enable_steering:
                 pwm_steering = (50 + self.steering_cmd) | 0x80
             else:
-                pwm_steering = (50 + self.steering_cmd) & 0x80
+                pwm_steering = (50 + self.steering_cmd) & ~0x80
             
             print("speed_pwm: ",(50 + self.speed_cmd),"steering_pwm: ", (50 + self.steering_cmd) )
 
-            msg = can.Message(arbitration_id=CMC,data=[pwm_motor_R, pwm_motor_L, pwm_steering,0,0,0,0,0],extended_id=False)
+            msg = can.Message(arbitration_id=CMC,data=[pwm_motor_L, pwm_motor_R, pwm_steering,0,0,0,0,0],extended_id=False)
 
             try:
                 self.bus.send(msg)
@@ -210,8 +210,6 @@ def RPM_to_PWM_backward(RPM):
 sum_rightError = 0    # Sum of the errors for the integral correction
 sum_leftError = 0  
 sum_angleError = 0
-rightRef_old = 0
-leftRef_old = 0
 time_old = 0
 rightError_old = 0
 leftError_old = 0
@@ -222,12 +220,11 @@ leftError_old = 0
 def speed_PID(rightRef, leftRef):
     global sum_rightError, sum_leftError
     global rightError_old, leftError_old
-    global rightRef_old, leftRef_old
     global time_old
     global MOTOR_SENSORS
-    kp=0.5       #Proportional coefficient
-    ki=40.0      #Integral coefficient
-    kd=0         #Derivative coefficient
+    kp=0.4     #Proportional coefficient
+    ki=40      #Integral coefficient
+    kd=0       #Derivative coefficient
     
     time_new = time.clock()    
     delta_t = time_new - time_old
@@ -242,19 +239,12 @@ def speed_PID(rightRef, leftRef):
     rightError = rightRef - R_speed
     leftError = leftRef - L_speed
     #print("Right error ", rightError)    
-    # I calculation, it resets if we change the reference
-    if(rightRef_old != rightRef or leftRef_old != leftRef):
-        rightRef_old = rightRef
-        leftRef_old = leftRef
-        sum_rightError = 0
-        I_right = 0
-        sum_leftError = 0
-        I_left = 0
-    else:
-        I_right = sum_rightError + (ki * rightError * delta_t)
-        print("Sum right error ",sum_rightError)
-        I_left = sum_leftError + (ki * leftError * delta_t)
-        
+    I_right = sum_rightError + (ki * rightError * delta_t)    
+    I_left = sum_leftError + (ki * leftError * delta_t)
+    sum_rightError = I_right
+    sum_leftError = I_left
+    #print("R_error ",rightError," L_error",leftError)
+    #print("Sum right error ",sum_rightError, " left err. ", sum_leftError)     
     delta_rightError = rightError - rightError_old
     delta_leftError = leftError - leftError_old
     
@@ -273,14 +263,17 @@ def speed_PID(rightRef, leftRef):
     # Conversion RPM to PWM
     if (rightRef > 0):
         cmdRight = int(RPM_to_PWM_forward(cmdRight_RPM))
-        cmdLeft = int(RPM_to_PWM_forward(cmdLeft_RPM))
     elif (rightRef < 0):
         cmdRight = int(RPM_to_PWM_backward(cmdRight_RPM))
-        cmdLeft = int(RPM_to_PWM_backward(cmdLeft_RPM))
     elif(rightRef == 0):
         cmdRight = 0
+
+    if (leftRef > 0):
+        cmdLeft = int(RPM_to_PWM_forward(cmdLeft_RPM))
+    elif (leftRef < 0):
+        cmdLeft = int(RPM_to_PWM_backward(cmdLeft_RPM))
+    elif(leftRef == 0):
         cmdLeft = 0
-    #print(cmdRight)
        
     return cmdRight, cmdLeft 
 

@@ -21,8 +21,8 @@ def callback(data):
     global i      # i is used to close properly the files after a the defined delay, here 10000 callbacks (it corresponds to something like 10s, it's not precise)
     if i<10000:
         i=i+1
-        print(i)
-        print('Time : ', 100*time.clock())
+        #print(i)
+        #print('Time : ', 100*time.clock())
         data_file.write("{}\n".format(data.data[3]))
         time_file.write("{}\n".format(time.clock()))
     else:
@@ -32,7 +32,7 @@ def callback(data):
     
 def listener():
     rospy.init_node('listener2', anonymous=True)
-    rospy.Subscriber('/mot_sens', Float32MultiArray, callback)
+    rospy.Subscriber('/motor_sensors', Float32MultiArray, callback)
     
 if __name__ == '__main__':    
     listener()

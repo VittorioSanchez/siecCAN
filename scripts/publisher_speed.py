@@ -5,7 +5,7 @@ import rospy
 from geometry_msgs.msg import Twist 
 
 def talker():
-    pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
+    pub = rospy.Publisher('/speed_cmd', Twist, queue_size=10)
     rospy.init_node('talker', anonymous=True)
     move_cmd = Twist() #create a twist message
     #move_cmd.linear.x = 1.0
