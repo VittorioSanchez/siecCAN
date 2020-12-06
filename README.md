@@ -10,6 +10,8 @@ The other scripts are used for testing, when *listener.py* is running:
 - **publisher_direction.py**: script used to send angular speed commands
 - **publisher_speed.py**: script used to send speed commands
 
+You need Raspbian and ROS Melodic installed on a Raspberry Pi 3 at least.
+
 ## How to launch the project properly
 
 1. Launch the car
