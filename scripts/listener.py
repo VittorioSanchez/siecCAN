@@ -105,6 +105,7 @@ class MyReceive(Thread):
             MOTOR_COMMANDS.MUT.acquire()
             self.speed_cmd = MOTOR_COMMANDS.speed_cmd
             self.steering_cmd = MOTOR_COMMANDS.steering_cmd
+            self.enable_speed = MOTOR_COMMANDS.drive_enabled
             MOTOR_COMMANDS.MUT.release()
             #self.steering_cmd = steering_PID(self.steering_cmd)
             ########## with PID ###########
@@ -361,11 +362,11 @@ def callback_detection(data):
     
     MOTOR_COMMANDS.MUT.acquire()
     if (data == 0): #if nothing is detected
-        MOTOR_COMMAND.drive_enabled = 1
+        MOTOR_COMMANDS.drive_enabled = 1
         
     else: #if anything is detected
         MOTOR_COMMANDS.speed_cmd = 0
-        MOTOR_COMMAND.drive_enabled = 0
+        MOTOR_COMMANDS.drive_enabled = 0
     MOTOR_COMMANDS.MUT.release()
 
     
