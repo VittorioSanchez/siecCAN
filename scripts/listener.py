@@ -61,19 +61,37 @@ class CMC_ROS:
     def __init__(self):
         self.speed_cmd = 0
         self.steering_cmd = 0
+        self.steering_enabled = 0
         self.drive_enabled = 1
         self.MUT = Lock()
 
 class MS_ROS:
     def __init__(self):
         self.steering_angle = 0  #Bytes 0-1 / Steering Wheel Angle
+        self.steering_center = 0
         self.batt_level = 0      #Bytes 2-3 / Battery Level
         self.motor_speed_L = 0   #Bytes 4-5 / Left Motor Speed
         self.motor_speed_R = 0   #Bytes 6-7 / Right Motor Speed
         self.MUT = Lock()
 
+class US1_ROS:
+    def __init__(self):
+        self.frontLeftUltr = 0  #Bytes 0-1 / Front Left Ultrasonic US_AVG
+        self.frontRightUltr = 0      #Bytes 2-3 / Front Right Ultrasonic US_AVD
+        self.rearCentralUltr = 0   #Bytes 4-5 / Central Rear Ultrasonic US_ARCa
+        self.MUT = Lock()
+
+class US2_ROS:
+    def __init__(self):
+        self.rearLeftUltr= 0  #Bytes 0-1 / Left Rear Ultrasonic US_ARG
+        self.rearRightUltr = 0      #Bytes 2-3 / Right Rear Ultrasonic US_ARD
+        self.frontCentralUltr = 0   #Bytes 4-5 / Central Front Ultrasonic US_AVC
+        self.MUT = Lock()
+
 MOTOR_COMMANDS = CMC_ROS()
 MOTOR_SENSORS = MS_ROS()
+ULTRASONIC_SENSORS1 = US1_ROS()
+ULTRASONIC_SENSORS2 = US2_ROS()
 
 ###########################################################
 
@@ -86,7 +104,7 @@ class MyReceive(Thread):
 
         self.speed_cmd = 0
         self.steering_cmd = 0
-        self.enable_steering = 0
+        self.steering_enable = 0
         self.enable_speed = 0
         self.motor_cmd_R = 0
         self.motor_cmd_L = 0
@@ -94,7 +112,7 @@ class MyReceive(Thread):
     def run(self):
         self.speed_cmd = 0
         self.steering_cmd = 0
-        self.enable_steering = 1
+        self.steering_enable = 0
         self.enable_speed = 1
         self.motor_cmd_R = 0
         self.motor_cmd_L = 0
@@ -105,6 +123,7 @@ class MyReceive(Thread):
             MOTOR_COMMANDS.MUT.acquire()
             self.speed_cmd = MOTOR_COMMANDS.speed_cmd
             self.steering_cmd = MOTOR_COMMANDS.steering_cmd
+            self.steering_enable = MOTOR_COMMANDS.steering_enabled
             MOTOR_COMMANDS.MUT.release()
             #self.steering_cmd = steering_PID(self.steering_cmd)
             ########## with PID ###########
@@ -122,11 +141,21 @@ class MyReceive(Thread):
             else:
                 pwm_motor_R = (50 + self.motor_cmd_R) & ~0x80
                 pwm_motor_L = (50 + self.motor_cmd_L) & ~0x80
-                 
-            if self.enable_steering:
+            
+            self.steering_cmd = steering_PID(self.steering_cmd)
+            if self.steering_enable:
                 pwm_steering = (50 + self.steering_cmd) | 0x80
             else:
-                pwm_steering = (50 + self.steering_cmd) & ~0x80
+                pwm_steering = (50 + self.steering_cmd) & ~0x80               
+                global MOTOR_SENSORS
+                MOTOR_SENSORS.MUT.acquire()
+                MOTOR_SENSORS.steering_center = MOTOR_SENSORS.steering_angle
+                print("center update")
+                if  (MOTOR_SENSORS.steering_center != 0):              
+                    MOTOR_COMMANDS.MUT.acquire()            
+                    MOTOR_COMMANDS.steering_enabled = 1
+                    MOTOR_COMMANDS.MUT.release()
+                MOTOR_SENSORS.MUT.release()
             
             print("speed_pwm: ",(50 + self.speed_cmd),"steering_pwm: ", (50 + self.steering_cmd) )
 
@@ -149,19 +178,35 @@ class MySend(Thread):
     
         self.batt_level = 0.0
         self.steering_angle = 0.0
+        self.steering_center = 0.0
         self.motor_speed_L = 0.0
         self.motor_speed_R = 0.0
+        self.frontLeftUltr = 0.0
+        self.frontRightUltr = 0.0 
+        self.rearCentralUltr = 0.0
+        self.rearLeftUltr= 0.0
+        self.rearRightUltr = 0.0
+        self.frontCentralUltr = 0.0
+        
 
     def run(self):
         while True :
             msg = self.bus.recv()
-
+            
+            global MOTOR_SENSORS
+            MOTOR_SENSORS.MUT.acquire()
+            self.steering_center = MOTOR_SENSORS.steering_center
+            MOTOR_SENSORS.MUT.release()
+            
             #print(msg.arbitration_id, msg.data)
             st = ""
 
             if msg.arbitration_id == MS:
                 # Steering wheel angle
-                self.steering_angle = (int(codecs.encode(msg.data[0:2],'hex'), 16)-1831)/19.45
+                if (self.steering_center == 0):
+                    self.steering_angle = (int(codecs.encode(msg.data[0:2],'hex'), 16))
+                else:
+                    self.steering_angle = (int(codecs.encode(msg.data[0:2],'hex'), 16)-self.steering_center)/19.45
                 # Battery level
                 self.batt_level = ((int(codecs.encode(msg.data[2:4],'hex'), 16)*(3.3/0.20408))/4095)
                 # Left wheel speed
@@ -170,15 +215,48 @@ class MySend(Thread):
                 # header : SWR payload : integer, *0.01rpm
                 self.motor_speed_R= int(codecs.encode(msg.data[6:8],'hex'), 16)*0.01
                 
-                #print("steering_angle: ",self.steering_angle,"; batt_level: ",self.batt_level,"; left_speed: ",self.motor_speed_L,"; right_speed: ",self.motor_speed_R)
-                
-            global MOTOR_SENSORS
+                print("steering_angle: ",self.steering_angle,"; batt_level: ",self.batt_level,"; left_speed: ",self.motor_speed_L,"; right_speed: ",self.motor_speed_R)
+                         
             MOTOR_SENSORS.MUT.acquire()
             MOTOR_SENSORS.batt_level = self.batt_level
             MOTOR_SENSORS.steering_angle = self.steering_angle
             MOTOR_SENSORS.motor_speed_L = self.motor_speed_L
             MOTOR_SENSORS.motor_speed_R = self.motor_speed_R
             MOTOR_SENSORS.MUT.release()
+            
+            if msg.arbitration_id == US1:
+                # Front left ultrasonic sensor
+                self.frontLeftUltr = int(codecs.encode(msg.data[0:2],'hex'), 16)
+                # Front right ultrasonic sensor
+                self.frontRightUltr =int(codecs.encode(msg.data[2:4],'hex'), 16)
+                # Central rear ultrasonic sensor
+                self.rearCentralUltr = int(codecs.encode(msg.data[4:6],'hex'), 16)
+                
+                print("ULTRASONIC1 --- frontLeftUltr: ",self.frontLeftUltr, " frontRightUltr: ",self.frontRightUltr, " rearCentralUltr: ",self.rearCentralUltr)
+
+            global ULTRASONIC_SENSORS1
+            ULTRASONIC_SENSORS1.MUT.acquire()
+            ULTRASONIC_SENSORS1.frontLeftUltr = self.frontLeftUltr
+            ULTRASONIC_SENSORS1.frontRightUltr = self.frontRightUltr
+            ULTRASONIC_SENSORS1.rearCentralUltr = self.rearCentralUltr 
+            ULTRASONIC_SENSORS1.MUT.release()
+
+            if msg.arbitration_id == US2:
+                # Left rear ultrasonic sensor
+                self.rearLeftUltr = int(codecs.encode(msg.data[0:2],'hex'), 16)
+                # Right rear ultrasonic sensor
+                self.rearRightUltr = int(codecs.encode(msg.data[2:4],'hex'), 16)
+                # Central frontal ultrasonic sensor
+                self.frontCentralUltr = int(codecs.encode(msg.data[4:6],'hex'), 16)
+                
+                print("ULTRASONIC2 --- rearLeftUltr: ",self.rearLeftUltr, " rearRightUltr: ",self.rearRightUltr, " frontCentralUltr: ",self.frontCentralUltr)
+            
+            global ULTRASONIC_SENSORS2
+            ULTRASONIC_SENSORS2.MUT.acquire()
+            self.rearLeftUltr = ULTRASONIC_SENSORS2.rearLeftUltr
+            self.rearRightUltr = ULTRASONIC_SENSORS2.rearRightUltr
+            self.frontCentralUltr = ULTRASONIC_SENSORS2.frontCentralUltr
+            ULTRASONIC_SENSORS2.MUT.release()
     
 #Converts RPM to the PWM corresponding value
 #For the forward mode:
@@ -282,14 +360,14 @@ def speed_PID(rightRef, leftRef):
 # max to the left => -30deg => PWM of 0 => -50 for PWM centered in 0
 # straight => 0deg => PWM of 50 => 0 for PWM centered in 0
 def Angle_to_PWM(Angle):
-    a = 1.6667
+    a = 1
     b = 0
     PWM=a*Angle+b
     if PWM>50:
         PWM=50
     elif PWM<-50:
         PWM=-50
-    return PWM
+    return -PWM #car tourner a droite pwm positif alors que erreur negative sinon 
 
 
 # PID to control car's steering wheel (so the direction)
@@ -298,7 +376,7 @@ def Angle_to_PWM(Angle):
 def steering_PID(refAngle):
     global MOTOR_SENSORS
     MOTOR_SENSORS.MUT.acquire()
-    kp = 0
+    kp = 10
     ki = 0
     angle = MOTOR_SENSORS.steering_angle  # angle given by the sensor (in degrees)
     MOTOR_SENSORS.MUT.release()
@@ -327,6 +405,10 @@ def callback_motor_cmd(data):
     MOTOR_COMMANDS.MUT.acquire()
     if(MOTOR_COMMANDS.drive_enabled == 1):
         MOTOR_COMMANDS.speed_cmd = int(data.linear.x)
+        if (data.angular.z<(-25)):
+            MOTOR_COMMANDS.steering_cmd = -25
+        elif (data.angular.z>(25)):
+            MOTOR_COMMANDS.steering_cmd = 25
         MOTOR_COMMANDS.steering_cmd = int(data.angular.z)
     else:
         print('Driving is not allowed because of object detection')
@@ -368,6 +450,32 @@ def callback_detection(data):
         MOTOR_COMMAND.drive_enabled = 0
     MOTOR_COMMANDS.MUT.release()
 
+def callback_ultrasonicDetection():
+    global ULTRASONIC_SENSORS1
+    global ULTRASONIC_SENSORS2
+    global MOTOR_COMMANDS
+
+    ULTRASONIC_SENSORS1.MUT.acquire()
+    fLU = float(ULTRASONIC_SENSORS1.frontLeftUltr) # Front left ultrasonic sensor
+    fRU = float(ULTRASONIC_SENSORS1.frontRightUltr) # Front right ultrasonic sensor
+    rCU = float(ULTRASONIC_SENSORS1.rearCentralUltr) # Central rear ultrasonic sensor
+    ULTRASONIC_SENSORS1.MUT.release()
+
+    ULTRASONIC_SENSORS2.MUT.acquire()
+    rLU = float(ULTRASONIC_SENSORS2.rearLeftUltr) # Left rear ultrasonic sensor 
+    rRU = float(ULTRASONIC_SENSORS2.rearRightUltr) # Right rear ultrasonic sensor 
+    fCU = float(ULTRASONIC_SENSORS2.frontCentralUltr) # Central front ultrasonic sensor
+    ULTRASONIC_SENSORS2.MUT.release()
+    
+    MOTOR_COMMANDS.MUT.acquire()
+    if((fLU or fRU or rCU or rLU or rRU or fCU) < 10.0): #if anything is detected in less than 10 centimeters the car stops
+        print('I heard there is a hurdle')    
+        MOTOR_COMMANDS.speed_cmd = 0
+        MOTOR_COMMAND.drive_enabled = 0
+    else: # nothing is detected         
+        MOTOR_COMMAND.drive_enabled = 1
+    
+    MOTOR_COMMANDS.MUT.release()
     
 def listener():
     # In ROS, nodes are uniquely named. If two nodes with the same
@@ -388,6 +496,8 @@ class MyTalker(Thread):
     def run(self):
         global MOTOR_SENSORS
         pub = rospy.Publisher('/motor_sensors', Float32MultiArray, queue_size=10)
+        pubUltr1 = rospy.Publisher('/ultrasonic_sensors1', Float32MultiArray, queue_size=10)
+        pubUltr2 = rospy.Publisher('/ultrasonic_sensors2', Float32MultiArray, queue_size=10)
         #rospy.init_node('talker', anonymous=True)
         rate = rospy.Rate(10) # 10hz
         vect = Float32MultiArray()
@@ -396,12 +506,40 @@ class MyTalker(Thread):
         vect.layout.dim[0].size = 4
         vect.layout.dim[0].stride = 4
         
+        #Ultrasonic1 publisher
+        rateU = rospy.Rate(10) # 10hz
+        vectU = Float32MultiArray()
+        vectU.layout.dim.append(MultiArrayDimension())
+        vectU.layout.dim[0].label = "height"
+        vectU.layout.dim[0].size = 3
+        vectU.layout.dim[0].stride = 3
+
+        #Ultrasonic1 publisher
+        rateU2 = rospy.Rate(10) # 10hz
+        vectU2 = Float32MultiArray()
+        vectU2.layout.dim.append(MultiArrayDimension())
+        vectU2.layout.dim[0].label = "height"
+        vectU2.layout.dim[0].size = 3
+        vectU2.layout.dim[0].stride = 3
+        
         while not rospy.is_shutdown():            
             MOTOR_SENSORS.MUT.acquire()
             vect.data = [MOTOR_SENSORS.steering_angle, MOTOR_SENSORS.batt_level, MOTOR_SENSORS.motor_speed_L, MOTOR_SENSORS.motor_speed_R]    
             MOTOR_SENSORS.MUT.release()
             pub.publish(vect)
             rate.sleep()
+            
+            ULTRASONIC_SENSORS1.MUT.acquire()
+            vectU.data = [ULTRASONIC_SENSORS1.frontLeftUltr, ULTRASONIC_SENSORS1.frontRightUltr, ULTRASONIC_SENSORS1.rearCentralUltr]    
+            ULTRASONIC_SENSORS1.MUT.release()
+            pubUltr1.publish(vectU)
+            rateU.sleep()
+
+            ULTRASONIC_SENSORS2.MUT.acquire()
+            vectU2.data = [ULTRASONIC_SENSORS2.rearLeftUltr, ULTRASONIC_SENSORS2.rearRightUltr, ULTRASONIC_SENSORS2.frontCentralUltr]    
+            ULTRASONIC_SENSORS2.MUT.release()
+            pubUltr2.publish(vectU2)
+            rateU2.sleep()
             
 
 if __name__ == '__main__':
