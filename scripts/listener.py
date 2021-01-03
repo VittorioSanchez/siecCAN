@@ -406,6 +406,7 @@ def callback_motor_cmd(data):
     print('I heard %d', data.linear.x)
     global MOTOR_COMMANDS
     MOTOR_COMMANDS.MUT.acquire()
+    print("ENABLE VALUE IS = ", MOTOR_COMMANDS.drive_enabled)
     if(MOTOR_COMMANDS.drive_enabled == 1):
         MOTOR_COMMANDS.speed_cmd = int(data.linear.x)
         if (data.angular.z<(-25)):
@@ -414,7 +415,8 @@ def callback_motor_cmd(data):
             MOTOR_COMMANDS.steering_cmd = 25
         MOTOR_COMMANDS.steering_cmd = int(data.angular.z)
     else:
-        print('Driving is not allowed because of object detection')
+        print('DRIVING IS NOT ALLOWED BECAUSE OF OBJECT DETECTION')
+        
     MOTOR_COMMANDS.MUT.release()
 
 #function that return the object name regarding the ROS number that was read on the ROS topic
@@ -441,16 +443,19 @@ def ROS_number_to_Detection(class_number):
     
 def callback_detection(data):
     #rospy.loginfo(rospy.get_caller_id() + 'I heard %d', data.linear.x)
-    print('I heard there is: ', ROS_number_to_Detection(data))
+    print('I heard that we detected (NUMBER): ', data.data) 
+    print('I heard that we detected (STRING): ', ROS_number_to_Detection(data.data))
     global MOTOR_COMMANDS
     
     MOTOR_COMMANDS.MUT.acquire()
-    if (data == 0): #if nothing is detected
+    if (data.data == 0): #if nothing is detected
         MOTOR_COMMANDS.drive_enabled = 1
+        print("WE ENABLE COMMANDS")
         
     else: #if anything is detected
         MOTOR_COMMANDS.speed_cmd = 0
         MOTOR_COMMANDS.drive_enabled = 0
+        print("WE DISABLE COMMANDS")
     MOTOR_COMMANDS.MUT.release()
 
 def callback_ultrasonicDetection():
