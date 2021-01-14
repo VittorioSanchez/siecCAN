@@ -322,9 +322,9 @@ class MySend(Thread):
 
             #------IMU frames------
             if msg.arbitration_id == IMU_ACCELXY:
-                # x acceleration, converted from mg to m/s²
+                # x acceleration, converted from mg to m/s**2
                 self.x_acceleration = (int(codecs.encode(msg.data[0:4],'hex'), 16))*0.001*VALG
-                # y acceleration, converted from mg to m/s²
+                # y acceleration, converted from mg to m/s**2
                 self.y_acceleration = (int(codecs.encode(msg.data[4:8],'hex'), 16))*0.001*VALG
 
             global IMU
@@ -358,7 +358,7 @@ class MySend(Thread):
             IMU.MUT.release()
 
             if msg.arbitration_id == IMU_ACCELMAGNETOZ:
-                # z acceleration, converted from mg to m/s²
+                # z acceleration, converted from mg to m/s**2
                 self.z_acceleration = (int(codecs.encode(msg.data[0:4],'hex'), 16))*0.001*VALG
                 # z magnetic field, converted from milliGauss to Tesla
                 self.z_magneto = (int(codecs.encode(msg.data[4:8],'hex'), 16))*0.0000001
