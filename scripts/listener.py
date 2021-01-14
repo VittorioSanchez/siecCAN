@@ -39,6 +39,13 @@ from std_msgs.msg import String
 from geometry_msgs.msg import Twist 
 from std_msgs.msg import Float32MultiArray
 from std_msgs.msg import MultiArrayDimension
+from sensor_msgs.msg import Imu
+from sensor_msgs.msg import NavSatFix
+from sensor_msgs.msg import NavSatStatus
+from sensor_msgs.msg import MagneticField
+from geometry_msgs.msg import Vector3
+from geometry_msgs.msg import Quaternion
+
 
 from threading import Thread, Lock
 import time
@@ -48,6 +55,8 @@ import struct
 import codecs
 from ctypes import *
 
+VALPI = 3.142
+VALG = 9.807
 
 CMC = 0x010
 MS = 0x100
@@ -55,6 +64,12 @@ US1 = 0x000
 US2 = 0x001
 OM1 = 0x101
 OM2 = 0x102
+GPS = 0x201
+IMU_ACCELXY = 0x202
+IMU_MAGNETOXY = 0x203
+IMU_ROTATIONXY = 0x204
+IMU_ACCELMAGNETOZ = 0x205
+IMU_ROTATIONZ = 0x206
 
 ############### SHARED VARIABLES (mutex) ##################
 class CMC_ROS:
@@ -88,10 +103,33 @@ class US2_ROS:
         self.frontCentralUltr = 0   #Bytes 4-5 / Central Front Ultrasonic US_AVC
         self.MUT = Lock()
 
+class GPS_ROS:
+    def __init__(self):
+        self.latitude = 0       #bytes 0..3 / Latitude
+        self.longitude = 0      #bytes 4..7 / Longitude
+        self.MUT = Lock()
+
+class IMU_ROS:
+    def __init__(self):
+        self.x_acceleration = 0      #id 202 / bytes 0..3 / x linear velocity
+        self.y_acceleration = 0      #id 202 / bytes 4..7 / y linear velocity
+        self.z_acceleration = 0      #id 205 / bytes 0..3 / z linear velocity
+
+        self.x_rotation = 0      #id 204 / bytes 0..3 / x rotation
+        self.y_rotation = 0      #id 204 / bytes 4..7 / y rotation
+        self.z_rotation = 0      #id 206 / bytes 0..3 / z rotation
+
+        self.x_magneto = 0      #id 203 / bytes 0..3 / x magnetic field
+        self.y_magneto = 0      #id 203 / bytes 4..7 / y magnetic field
+        self.z_magneto = 0      #id 205 / bytes 4..7 / z magnetic field
+        self.MUT = Lock()
+
 MOTOR_COMMANDS = CMC_ROS()
 MOTOR_SENSORS = MS_ROS()
 ULTRASONIC_SENSORS1 = US1_ROS()
 ULTRASONIC_SENSORS2 = US2_ROS()
+GPS = GPS_ROS()
+IMU = IMU_ROS()
 
 ###########################################################
 
@@ -190,6 +228,17 @@ class MySend(Thread):
         self.rearLeftUltr= 0.0
         self.rearRightUltr = 0.0
         self.frontCentralUltr = 0.0
+        self.latitude = 0.0
+        self.longitude = 0.0
+        self.x_acceleration = 0.0
+        self.y_acceleration = 0.0
+        self.z_acceleration = 0.0
+        self.x_rotation = 0.0
+        self.y_rotation = 0.0
+        self.z_rotation = 0.0
+        self.x_magneto = 0.0
+        self.y_magneto = 0.0
+        self.z_magneto = 0.0
         
 
     def run(self):
@@ -260,6 +309,74 @@ class MySend(Thread):
             self.rearRightUltr = ULTRASONIC_SENSORS2.rearRightUltr
             self.frontCentralUltr = ULTRASONIC_SENSORS2.frontCentralUltr
             ULTRASONIC_SENSORS2.MUT.release()
+
+            if msg.arbitration_id == GPS:
+                self.latitude = (int(codecs.encode(msg.data[0:4],'hex'), 16))*0.0000001
+                self.longitude = (int(codecs.encode(msg.data[4:8],'hex'), 16))*0.0000001
+
+            global GPS
+            GPS.MUT.acquire()
+            self.latitude = GPS.latitude
+            self.longitude = GPS.longitude
+            GPS.MUT.release()
+
+            #------IMU frames------
+            if msg.arbitration_id == IMU_ACCELXY:
+                # x acceleration, converted from mg to m/s²
+                self.x_acceleration = (int(codecs.encode(msg.data[0:4],'hex'), 16))*0.001*VALG
+                # y acceleration, converted from mg to m/s²
+                self.y_acceleration = (int(codecs.encode(msg.data[4:8],'hex'), 16))*0.001*VALG
+
+            global IMU
+            IMU.MUT.acquire()
+            self.x_acceleration = IMU.x_acceleration
+            self.y_acceleration = IMU.y_acceleration
+            IMU.MUT.release()
+
+            if msg.arbitration_id == IMU_MAGNETOXY:
+                # x magnetic field, converted from milliGauss to Tesla
+                self.x_magneto = (int(codecs.encode(msg.data[0:4],'hex'), 16))*0.0000001
+                # y magnetic field, converted from milliGauss to Tesla
+                self.y_magneto = (int(codecs.encode(msg.data[4:8],'hex'), 16))*0.0000001
+
+            global IMU
+            IMU.MUT.acquire()
+            self.x_magneto = IMU.x_magneto
+            self.y_magneto = IMU.y_magneto
+            IMU.MUT.release()
+
+            if msg.arbitration_id == IMU_ROTATIONXY:
+                # x rotation, converted from mdps to rad/sec
+                self.x_rotation = (int(codecs.encode(msg.data[0:4],'hex'), 16))*0.001*(VALPI/180)
+                # y rotation, converted from mdps to rad/sec
+                self.y_rotation = (int(codecs.encode(msg.data[4:8],'hex'), 16))*0.001*(VALPI/180)
+
+            global IMU
+            IMU.MUT.acquire()
+            self.x_rotation = IMU.x_rotation
+            self.y_rotation = IMU.y_rotation
+            IMU.MUT.release()
+
+            if msg.arbitration_id == IMU_ACCELMAGNETOZ:
+                # z acceleration, converted from mg to m/s²
+                self.z_acceleration = (int(codecs.encode(msg.data[0:4],'hex'), 16))*0.001*VALG
+                # z magnetic field, converted from milliGauss to Tesla
+                self.z_magneto = (int(codecs.encode(msg.data[4:8],'hex'), 16))*0.0000001
+                
+            global IMU
+            IMU.MUT.acquire()
+            self.z_acceleration = IMU.z_acceleration
+            self.z_magneto = IMU.z_magneto
+            IMU.MUT.release()
+
+            if msg.arbitration_id == IMU_ROTATIONZ:
+                # z rotation, converted from mdps to rad/sec
+                self.z_rotation = (int(codecs.encode(msg.data[0:4],'hex'), 16))*0.001*(VALPI/180)
+
+            global IMU
+            IMU.MUT.acquire()
+            self.z_rotation = IMU.z_rotation
+            IMU.MUT.release()
     
 #Converts RPM to the PWM corresponding value
 #For the forward mode:
@@ -506,6 +623,10 @@ class MyTalker(Thread):
         pub = rospy.Publisher('/motor_sensors', Float32MultiArray, queue_size=10)
         pubUltr1 = rospy.Publisher('/ultrasonic_sensors1', Float32MultiArray, queue_size=10)
         pubUltr2 = rospy.Publisher('/ultrasonic_sensors2', Float32MultiArray, queue_size=10)
+        pubGPS = rospy.Publisher('/GPS_coordinates', NavSatFix, queue_size=10)
+        pubIMUraw = rospy.Publisher('/IMU_raw_data', Imu, queue_size=10)
+        pubIMUmagn = rospy.Publisher('IMU_magneto', MagneticField, queue_size=10)
+
         #rospy.init_node('talker', anonymous=True)
         rate = rospy.Rate(10) # 10hz
         vect = Float32MultiArray()
@@ -529,7 +650,43 @@ class MyTalker(Thread):
         vectU2.layout.dim[0].label = "height"
         vectU2.layout.dim[0].size = 3
         vectU2.layout.dim[0].stride = 3
-        
+
+        #GPS publisher
+        rateGPS = rospy.Rate(10)
+        vectGPS = NavSatFix()
+        vectGPS.status.status = 1
+        vectGPS.status.service = 1
+        vectGPS.altitude = 0.0
+        vectGPS.position_covariance[0] = 1.0
+        vectGPS.position_covariance[4] = 1.0
+        vectGPS.position_covariance[8] = 1.0
+        vectGPS.position_covariance_type = 0 #0=Unknown
+
+        #IMU raw data publisher
+        rateIMUraw = rospy.Rate(10)
+        vectIMUraw = Imu()
+        vectIMUraw.orientation.x = 0.0
+        vectIMUraw.orientation.y = 0.0
+        vectIMUraw.orientation.z = 0.0
+        vectIMUraw.orientation.w = 0.0
+        vectIMUraw.orientation_covariance[0] = 0.0
+        vectIMUraw.orientation_covariance[4] = 0.0
+        vectIMUraw.orientation_covariance[8] = 0.0
+        vectIMUraw.angular_velocity_covariance[0] = (3.40)*(10**(-6))
+        vectIMUraw.angular_velocity_covariance[4] = (7.96)*(10**(-7))
+        vectIMUraw.angular_velocity_covariance[8] = (1.69)*(10**(-5))
+        vectIMUraw.linear_acceleration_covariance[0] = (4.63)*(10**(-4))
+        vectIMUraw.linear_acceleration_covariance[4] = (8.79)*(10**(-4))
+        vectIMUraw.linear_acceleration_covariance[8] = (2.56)*(10**(-4))
+
+        #IMU magnetic field publisher
+        rateIMUmagn = rospy.Rate(10)
+        vectIMUmagn = MagneticField()
+        vectIMUmagn.magnetic_field_covariance[0] = 0.0
+        vectIMUmagn.magnetic_field_covariance[4] = 0.0
+        vectIMUmagn.magnetic_field_covariance[8] = 0.0
+
+
         while not rospy.is_shutdown():            
             MOTOR_SENSORS.MUT.acquire()
             vect.data = [MOTOR_SENSORS.steering_angle, MOTOR_SENSORS.batt_level, MOTOR_SENSORS.motor_speed_L, MOTOR_SENSORS.motor_speed_R]    
@@ -548,6 +705,34 @@ class MyTalker(Thread):
             ULTRASONIC_SENSORS2.MUT.release()
             pubUltr2.publish(vectU2)
             rateU2.sleep()
+
+            GPS.MUT.acquire()
+            vectGPS.latitude = GPS.latitude
+            vectGPS.longitude = GPS.longitude
+            GPS.MUT.release()
+            pubGPS.publish(vectGPS)
+            rateGPS.sleep()
+
+            IMU.MUT.acquire()
+            vectIMUraw.angular_velocity.x = IMU.x_rotation
+            vectIMUraw.angular_velocity.y = IMU.y_rotation
+            vectIMUraw.angular_velocity.z = IMU.z_rotation
+            vectIMUraw.linear_acceleration.x = IMU.x_acceleration
+            vectIMUraw.linear_acceleration.y = IMU.y_acceleration
+            vectIMUraw.linear_acceleration.z = IMU.z_acceleration
+            IMU.MUT.release()
+            pubIMUraw.publish(vectIMUraw)
+            rateIMUraw.sleep()
+
+            IMU.MUT.acquire()
+            vectIMUmagn.magnetic_field.x = IMU.x_magneto
+            vectIMUmagn.magnetic_field.y = IMU.y_magneto
+            vectIMUmagn.magnetic_field.z = IMU.z_magneto
+            IMU.MUT.release()
+            pubIMUmagn.publish(vectIMUmagn)
+            rateIMUmagn.sleep()
+
+
             
 
 if __name__ == '__main__':
