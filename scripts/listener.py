@@ -64,7 +64,7 @@ US1 = 0x000
 US2 = 0x001
 OM1 = 0x101
 OM2 = 0x102
-GPS = 0x201
+GPS_ID = 0x201
 IMU_ACCELXY = 0x202
 IMU_MAGNETOXY = 0x203
 IMU_ROTATIONXY = 0x204
@@ -191,22 +191,22 @@ class MyReceive(Thread):
                 global MOTOR_SENSORS
                 MOTOR_SENSORS.MUT.acquire()
                 MOTOR_SENSORS.steering_center = MOTOR_SENSORS.steering_angle
-                print("center update")
+                #print("center update")
                 if  (MOTOR_SENSORS.steering_center != 0):              
                     MOTOR_COMMANDS.MUT.acquire()            
                     MOTOR_COMMANDS.steering_enabled = 1
                     MOTOR_COMMANDS.MUT.release()
                 MOTOR_SENSORS.MUT.release()
             
-            print("speed_pwm: ",(50 + self.speed_cmd),"steering_pwm: ", (50 + self.steering_cmd) )
+            #print("speed_pwm: ",(50 + self.speed_cmd),"steering_pwm: ", (50 + self.steering_cmd) )
 
-            msg = can.Message(arbitration_id=CMC,data=[pwm_motor_L, pwm_motor_R, pwm_steering,0,0,0,0,0],extended_id=False)
+            #msg = can.Message(arbitration_id=CMC,data=[pwm_motor_L, pwm_motor_R, pwm_steering,0,0,0,0,0],extended_id=False)
 
-            try:
-                self.bus.send(msg)
-                print("Message sent")
-            except can.CanError:
-                print("Message NOT sent")
+            #try:
+                #self.bus.send(msg)
+                #print("Message sent")
+            #except can.CanError:
+                #print("Message NOT sent")
             
             time.sleep(0.1)
 
@@ -267,7 +267,7 @@ class MySend(Thread):
                 # header : SWR payload : integer, *0.01rpm
                 self.motor_speed_R= int(codecs.encode(msg.data[6:8],'hex'), 16)*0.01
                 
-                print("steering_angle: ",self.steering_angle,"; batt_level: ",self.batt_level,"; left_speed: ",self.motor_speed_L,"; right_speed: ",self.motor_speed_R)
+                #print("steering_angle: ",self.steering_angle,"; batt_level: ",self.batt_level,"; left_speed: ",self.motor_speed_L,"; right_speed: ",self.motor_speed_R)
                          
             MOTOR_SENSORS.MUT.acquire()
             MOTOR_SENSORS.batt_level = self.batt_level
@@ -284,7 +284,7 @@ class MySend(Thread):
                 # Central rear ultrasonic sensor
                 self.rearCentralUltr = int(codecs.encode(msg.data[4:6],'hex'), 16)
                 
-                print("ULTRASONIC1 --- frontLeftUltr: ",self.frontLeftUltr, " frontRightUltr: ",self.frontRightUltr, " rearCentralUltr: ",self.rearCentralUltr)
+                #print("ULTRASONIC1 --- frontLeftUltr: ",self.frontLeftUltr, " frontRightUltr: ",self.frontRightUltr, " rearCentralUltr: ",self.rearCentralUltr)
 
             global ULTRASONIC_SENSORS1
             ULTRASONIC_SENSORS1.MUT.acquire()
@@ -301,7 +301,7 @@ class MySend(Thread):
                 # Central frontal ultrasonic sensor
                 self.frontCentralUltr = int(codecs.encode(msg.data[4:6],'hex'), 16)
                 
-                print("ULTRASONIC2 --- rearLeftUltr: ",self.rearLeftUltr, " rearRightUltr: ",self.rearRightUltr, " frontCentralUltr: ",self.frontCentralUltr)
+                #print("ULTRASONIC2 --- rearLeftUltr: ",self.rearLeftUltr, " rearRightUltr: ",self.rearRightUltr, " frontCentralUltr: ",self.frontCentralUltr)
             
             global ULTRASONIC_SENSORS2
             ULTRASONIC_SENSORS2.MUT.acquire()
@@ -310,14 +310,15 @@ class MySend(Thread):
             self.frontCentralUltr = ULTRASONIC_SENSORS2.frontCentralUltr
             ULTRASONIC_SENSORS2.MUT.release()
 
-            if msg.arbitration_id == GPS:
+            if msg.arbitration_id == GPS_ID:
                 self.latitude = (int(codecs.encode(msg.data[0:4],'hex'), 16))*0.0000001
                 self.longitude = (int(codecs.encode(msg.data[4:8],'hex'), 16))*0.0000001
-
+                print("latitude =", self.latitude, "longitude =", self.longitude)
+                
             global GPS
             GPS.MUT.acquire()
-            self.latitude = GPS.latitude
-            self.longitude = GPS.longitude
+            GPS.latitude = self.latitude
+            GPS.longitude = self.longitude
             GPS.MUT.release()
 
             #------IMU frames------
@@ -329,8 +330,8 @@ class MySend(Thread):
 
             global IMU
             IMU.MUT.acquire()
-            self.x_acceleration = IMU.x_acceleration
-            self.y_acceleration = IMU.y_acceleration
+            IMU.x_acceleration = self.x_acceleration
+            IMU.y_acceleration = self.y_acceleration
             IMU.MUT.release()
 
             if msg.arbitration_id == IMU_MAGNETOXY:
@@ -341,8 +342,8 @@ class MySend(Thread):
 
             global IMU
             IMU.MUT.acquire()
-            self.x_magneto = IMU.x_magneto
-            self.y_magneto = IMU.y_magneto
+            IMU.x_magneto = self.x_magneto
+            IMU.y_magneto = self.y_magneto
             IMU.MUT.release()
 
             if msg.arbitration_id == IMU_ROTATIONXY:
@@ -353,8 +354,8 @@ class MySend(Thread):
 
             global IMU
             IMU.MUT.acquire()
-            self.x_rotation = IMU.x_rotation
-            self.y_rotation = IMU.y_rotation
+            IMU.x_rotation = self.x_rotation
+            IMU.y_rotation = self.y_rotation
             IMU.MUT.release()
 
             if msg.arbitration_id == IMU_ACCELMAGNETOZ:
@@ -365,8 +366,8 @@ class MySend(Thread):
                 
             global IMU
             IMU.MUT.acquire()
-            self.z_acceleration = IMU.z_acceleration
-            self.z_magneto = IMU.z_magneto
+            IMU.z_acceleration = self.z_acceleration
+            IMU.z_magneto = self.z_magneto
             IMU.MUT.release()
 
             if msg.arbitration_id == IMU_ROTATIONZ:
@@ -375,7 +376,7 @@ class MySend(Thread):
 
             global IMU
             IMU.MUT.acquire()
-            self.z_rotation = IMU.z_rotation
+            IMU.z_rotation = self.z_rotation
             IMU.MUT.release()
     
 #Converts RPM to the PWM corresponding value
@@ -501,7 +502,7 @@ def steering_PID(refAngle):
     angle = MOTOR_SENSORS.steering_angle  # angle given by the sensor (in degrees)
     MOTOR_SENSORS.MUT.release()
     angleError =refAngle-angle
-    print(angleError)
+    #print(angleError)
     global sum_angleError
     sum_angleError = sum_angleError + angleError # Integral error
     
@@ -513,17 +514,17 @@ def steering_PID(refAngle):
     #else:
     #    cmdAngle = int(Angle_to_PWM(cmdAngle_degre))
     
-    print('cmdAngle',cmdAngle)
+    #print('cmdAngle',cmdAngle)
     
     return cmdAngle 
 
 
 def callback_motor_cmd(data):
     #rospy.loginfo(rospy.get_caller_id() + 'I heard %d', data.linear.x)
-    print('I heard %d', data.linear.x)
+    #print('I heard %d', data.linear.x)
     global MOTOR_COMMANDS
     MOTOR_COMMANDS.MUT.acquire()
-    print("ENABLE VALUE IS = ", MOTOR_COMMANDS.drive_enabled)
+    #print("ENABLE VALUE IS = ", MOTOR_COMMANDS.drive_enabled)
     if(MOTOR_COMMANDS.drive_enabled == 1):
         MOTOR_COMMANDS.speed_cmd = int(data.linear.x)
         if (data.angular.z<(-25)):
