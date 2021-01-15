@@ -132,7 +132,11 @@ GPS = GPS_ROS()
 IMU = IMU_ROS()
 
 ###########################################################
-
+def twos_complement(hexstr,bits):
+    value = int(hexstr,16)
+    if value & (1<< (bits-1)):
+        value -= 1 << bits
+    return value
 
 class MyReceive(Thread):
     def __init__(self, bus):
@@ -200,13 +204,13 @@ class MyReceive(Thread):
             
             #print("speed_pwm: ",(50 + self.speed_cmd),"steering_pwm: ", (50 + self.steering_cmd) )
 
-            #msg = can.Message(arbitration_id=CMC,data=[pwm_motor_L, pwm_motor_R, pwm_steering,0,0,0,0,0],extended_id=False)
+            msg = can.Message(arbitration_id=CMC,data=[pwm_motor_L, pwm_motor_R, pwm_steering,0,0,0,0,0],extended_id=False)
 
-            #try:
-                #self.bus.send(msg)
-                #print("Message sent")
-            #except can.CanError:
-                #print("Message NOT sent")
+            try:
+                self.bus.send(msg)
+                print("Message sent")
+            except can.CanError:
+                print("Message NOT sent")
             
             time.sleep(0.1)
 
@@ -280,7 +284,7 @@ class MySend(Thread):
                 # Front left ultrasonic sensor
                 self.frontLeftUltr = int(codecs.encode(msg.data[0:2],'hex'), 16)
                 # Front right ultrasonic sensor
-                self.frontRightUltr =int(codecs.encode(msg.data[2:4],'hex'), 16)
+                self.frontRightUltr = int(codecs.encode(msg.data[2:4],'hex'), 16)
                 # Central rear ultrasonic sensor
                 self.rearCentralUltr = int(codecs.encode(msg.data[4:6],'hex'), 16)
                 
@@ -313,7 +317,7 @@ class MySend(Thread):
             if msg.arbitration_id == GPS_ID:
                 self.latitude = (int(codecs.encode(msg.data[0:4],'hex'), 16))*0.0000001
                 self.longitude = (int(codecs.encode(msg.data[4:8],'hex'), 16))*0.0000001
-                print("latitude =", self.latitude, "longitude =", self.longitude)
+                #print("latitude =", self.latitude, "longitude =", self.longitude)
                 
             global GPS
             GPS.MUT.acquire()
@@ -324,9 +328,9 @@ class MySend(Thread):
             #------IMU frames------
             if msg.arbitration_id == IMU_ACCELXY:
                 # x acceleration, converted from mg to m/s**2
-                self.x_acceleration = (int(codecs.encode(msg.data[0:4],'hex'), 16))*0.001*VALG
+                self.x_acceleration = twos_complement(codecs.encode(msg.data[0:4],'hex'),32)*0.001*VALG
                 # y acceleration, converted from mg to m/s**2
-                self.y_acceleration = (int(codecs.encode(msg.data[4:8],'hex'), 16))*0.001*VALG
+                self.y_acceleration = twos_complement(codecs.encode(msg.data[4:8],'hex'),32)*0.001*VALG
 
             global IMU
             IMU.MUT.acquire()
@@ -348,9 +352,9 @@ class MySend(Thread):
 
             if msg.arbitration_id == IMU_ROTATIONXY:
                 # x rotation, converted from mdps to rad/sec
-                self.x_rotation = (int(codecs.encode(msg.data[0:4],'hex'), 16))*0.001*(VALPI/180)
+                self.x_rotation = twos_complement(codecs.encode(msg.data[0:4],'hex'), 32)*0.001*(VALPI/180)
                 # y rotation, converted from mdps to rad/sec
-                self.y_rotation = (int(codecs.encode(msg.data[4:8],'hex'), 16))*0.001*(VALPI/180)
+                self.y_rotation = twos_complement(codecs.encode(msg.data[4:8],'hex'), 32)*0.001*(VALPI/180)
 
             global IMU
             IMU.MUT.acquire()
@@ -360,7 +364,7 @@ class MySend(Thread):
 
             if msg.arbitration_id == IMU_ACCELMAGNETOZ:
                 # z acceleration, converted from mg to m/s**2
-                self.z_acceleration = (int(codecs.encode(msg.data[0:4],'hex'), 16))*0.001*VALG
+                self.z_acceleration = twos_complement(codecs.encode(msg.data[0:4],'hex'), 32)*0.001*VALG
                 # z magnetic field, converted from milliGauss to Tesla
                 self.z_magneto = (int(codecs.encode(msg.data[4:8],'hex'), 16))*0.0000001
                 
@@ -372,7 +376,7 @@ class MySend(Thread):
 
             if msg.arbitration_id == IMU_ROTATIONZ:
                 # z rotation, converted from mdps to rad/sec
-                self.z_rotation = (int(codecs.encode(msg.data[0:4],'hex'), 16))*0.001*(VALPI/180)
+                self.z_rotation = twos_complement(codecs.encode(msg.data[0:4],'hex'), 16)*0.001*(VALPI/180)
 
             global IMU
             IMU.MUT.acquire()
