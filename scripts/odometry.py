@@ -1,11 +1,16 @@
 #!/usr/bin/env python
 
 import time, threading
+import os
 from threading import Thread, Lock
 import rospy
+import tf
 from geometry_msgs.msg import Twist 
 from std_msgs.msg import Float32MultiArray
+from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Point, Pose, Quaternion, Twist, Vector3
 from math import *
+
 
 class Pose:
     def __init__(self):
@@ -15,6 +20,15 @@ class Pose:
         self.MUT = Lock()
         
 POSE=Pose()
+
+class Velocity:
+    def __init__(self):
+        self.vx = 0  
+        self.vy = 0     
+        self.vtheta = 0   
+        self.MUT = Lock()
+        
+VELOCITY = Velocity()
 
 class MS_ROS:
     def __init__(self):
@@ -30,45 +44,72 @@ MOTOR_SENSORS = MS_ROS()
 ########ATTENTION AUX CONVERSIONS#############
 #sp en RPM 
 #st en radians
-PERIOD_ODOMETRY = 0.050 #en secondes
+PERIOD_ODOMETRY = 0.000050 #en secondes
 time_old = 0
-def update_odometry () :
-    global POSE
-    global MOTOR_SENSORS
-    global time_old 
-    L = 0.58 
+class update_odometry (Thread) :
+    def __init__(self):
+        Thread.__init__(self)
     
-    time_new = time.clock()    
-    delta_t = time_new - time_old
-    time_old = time_new 
-    
-    POSE.MUT.acquire()
-    position_x = POSE.x  
-    position_y = POSE.y  
-    position_theta = POSE.theta  
-    POSE.MUT.release() 
-     
-    #basic velocity inputs
-    MOTOR_SENSORS.MUT.acquire()
-    speed = MOTOR_SENSORS.motor_speed_L*0.63/60.0                  #m/s from rear wheels
-    steering_angle =  MOTOR_SENSORS.steering_angle*3.14/180.0        #radians
-    MOTOR_SENSORS.MUT.release()
+    def run(self):
+        global POSE
+        global MOTOR_SENSORS
+        global time_old 
+        global VELOCITY
+        L = 0.58 
+        while (True):
+            time_new = time.clock()    
+            delta_t = time_new - time_old
+            #print (delta_t)
+            time_old = time_new 
+            
+            POSE.MUT.acquire()
+            position_x = POSE.x  
+            position_y = POSE.y  
+            position_theta = POSE.theta  
+            POSE.MUT.release() 
+             
+            #basic velocity inputs
+            MOTOR_SENSORS.MUT.acquire()
+            speed = MOTOR_SENSORS.motor_speed_L*0.63/60.0                  #m/s from rear wheels
+            steering_angle =  MOTOR_SENSORS.steering_angle*3.14/180.0        #radians
+            MOTOR_SENSORS.MUT.release()
 
-    #compute odometry values from joint angles
-    #first get the theta update
-    delta_theta = (speed/L)*sin(steering_angle)*delta_t
-    
-    #compute odometry update values
-    delta_x = speed*cos(position_theta+steering_angle)*delta_t
-    delta_y = speed*sin(position_theta+steering_angle)*delta_t
-
-    #now update our pose estimate
-    POSE.MUT.acquire()
-    POSE.x = position_x + delta_x
-    POSE.y = position_y + delta_y
-    POSE.theta = position_theta + delta_theta
-    POSE.MUT.release()
-    threading.Timer(PERIOD_ODOMETRY, update_odometry).start()
+            #compute odometry values from joint angles
+            #first get the theta update
+            delta_theta = (speed/L)*sin(steering_angle)*delta_t
+            
+            
+            #compute odometry update values
+            delta_x = speed*cos(position_theta+steering_angle)*delta_t
+            delta_y = speed*sin(position_theta+steering_angle)*delta_t
+            
+            #compute velocities
+            v_x = delta_x / delta_t
+            v_y = delta_y / delta_t
+            v_theta = delta_theta / delta_t
+            
+            #affect the velocity to the VELOCITY class
+            VELOCITY.MUT.acquire()
+            VELOCITY.vx = v_x 
+            VELOCITY.vy = v_y 
+            VELOCITY.vtheta = v_theta 
+            VELOCITY.MUT.release()
+            
+            #update our pose estimate
+            position_x = position_x + delta_x
+            position_y = position_y + delta_y
+            position_theta = position_theta + delta_theta
+            
+            #affect the update to the POSE class
+            POSE.MUT.acquire()
+            POSE.x = position_x 
+            POSE.y = position_y 
+            POSE.theta = position_theta 
+            POSE.MUT.release()
+            #time.sleep (PERIOD_ODOMETRY)
+            #threading.Timer(PERIOD_ODOMETRY, update_odometry).start()
+            
+        
     
 def show_Pose ():
     global POSE
@@ -80,19 +121,73 @@ def show_Pose ():
     POSE.MUT.release()
     threading.Timer(1, show_Pose).start()
     
-def show_Ultrasound ():
-    global ULTRASONIC_SENSORS2
-    ULTRASONIC_SENSORS2.MUT.acquire()
-    print('Rear Ultrasound ', ULTRASONIC_SENSORS1.rearCentralUltr, ' cm')
-    ULTRASONIC_SENSORS2.MUT.release()
-    threading.Timer(1, show_Ultrasound).start()
     
 def listener():
-    rospy.init_node('odometry', anonymous=True)
-    rospy.Subscriber('/motor_sensors', Float32MultiArray, callback_sensor_motor)
-    rospy.Subscriber('/ultrasonic_sensors1', Float32MultiArray, callback_sensor_ultrasound1)
-    rospy.Subscriber('/ultrasonic_sensors2', Float32MultiArray, callback_sensor_ultrasound2)
     
+    rospy.Subscriber('/motor_sensors', Float32MultiArray, callback_sensor_motor)
+
+    
+class odometry_publisher(Thread):
+    def __init__(self):
+        Thread.__init__(self)
+    
+    def run(self):
+        global POSE
+        global VELOCITY
+        
+
+        
+        #odometry message & publisher
+        odom_pub = rospy.Publisher("odom", Odometry, queue_size=10)
+        #odom_broadcaster = tf.TransformBroadcaster()
+        rate = rospy.Rate(10) 
+        while not rospy.is_shutdown():
+            current_time = rospy.Time.now()
+            # since all odometry is 6DOF we'll need a quaternion created from yaw
+            POSE.MUT.acquire()
+            position_x = POSE.x  
+            position_y = POSE.y  
+            position_theta = POSE.theta  
+            POSE.MUT.release() 
+            
+            VELOCITY.MUT.acquire()
+            v_x = VELOCITY.vx 
+            v_y = VELOCITY.vy 
+            v_theta = VELOCITY.vtheta
+            VELOCITY.MUT.release()
+            #odom_quat = tf.transformations.quaternion_from_euler(0, 0, position_theta)
+            #print (odom_quat)
+
+            # first, we'll publish the transform over tf
+            '''odom_broadcaster.sendTransform(
+                (position_x, position_y, 0.),
+                odom_quat,
+                current_time,
+                "base_link",
+                "odom"
+            )'''
+
+            # next, we'll publish the odometry message over ROS
+            odom = Odometry()
+            odom.header.stamp = current_time
+            odom.header.frame_id = "odom"
+
+            # set the position
+            #odom.pose.pose = Pose(Point(position_x, position_y, 0.0), [0,0,0,0])
+
+            
+            odom.pose.pose.position.x = position_x
+            odom.pose.pose.position.y = position_y
+            odom.pose.pose.position.z = 0.0
+
+            # set the velocity
+            odom.child_frame_id = "base_link"
+            odom.twist.twist = Twist(Vector3(v_x, v_y, 0), Vector3(0, 0, v_theta))
+
+            # publish the message
+            odom_pub.publish(odom)
+            rate.sleep()
+
     
     
 def callback_sensor_motor(data):
@@ -104,51 +199,20 @@ def callback_sensor_motor(data):
     MOTOR_SENSORS.motor_speed_L = data.data[2]
     MOTOR_SENSORS.motor_speed_R = data.data[3]
     MOTOR_SENSORS.MUT.release()
-    
-class US1_ROS:
-    def __init__(self):
-        self.frontLeftUltr = 0  #Bytes 0-1 / Front Left Ultrasonic US_AVG
-        self.frontRightUltr = 0      #Bytes 2-3 / Front Right Ultrasonic US_AVD
-        self.rearCentralUltr = 0   #Bytes 4-5 / Central Rear Ultrasonic US_ARCa
-        self.MUT = Lock()
+ 
 
-class US2_ROS:
-    def __init__(self):
-        self.rearLeftUltr= 0  #Bytes 0-1 / Left Rear Ultrasonic US_ARG
-        self.rearRightUltr = 0      #Bytes 2-3 / Right Rear Ultrasonic US_ARD
-        self.frontCentralUltr = 0   #Bytes 4-5 / Central Front Ultrasonic US_AVC
-        self.MUT = Lock()
-
-ULTRASONIC_SENSORS1 = US1_ROS()
-ULTRASONIC_SENSORS2 = US2_ROS()
-def callback_sensor_ultrasound1(data):
-    #OK
-    global ULTRASONIC_SENSORS1
-    ULTRASONIC_SENSORS1.MUT.acquire()
-    ULTRASONIC_SENSORS1.frontLeftUltr = data.data[0]
-    ULTRASONIC_SENSORS1.frontRightUltr = data.data[1]
-    ULTRASONIC_SENSORS1.rearCentralUltr = data.data[2]
-    ULTRASONIC_SENSORS1.MUT.release()
-    
-def callback_sensor_ultrasound2(data):
-    #rospy.loginfo(rospy.get_caller_id() + 'I heard %d', data.linear.x)
-    #print('I heard speed :', data.data[2], data.data[1], data.data[0])
-    global ULTRASONIC_SENSORS2
-    ULTRASONIC_SENSORS2.MUT.acquire()
-    ULTRASONIC_SENSORS2.rearLeftUltr = data.data[0]
-    ULTRASONIC_SENSORS2.rearRightUltr = data.data[1]
-    ULTRASONIC_SENSORS2.frontCentralUltr = data.data[2]
-    #print (data.data[0])
-    ULTRASONIC_SENSORS2.MUT.release()
-
-    
-    
     
 if __name__ == '__main__':
+    rospy.init_node('odometry_computation', anonymous=True)
     listener()
-    update_odometry()
+    newThread = update_odometry()
+    newThread.start()
+    newrostalker = odometry_publisher()
+    newrostalker.start()
     show_Pose()
-    show_Ultrasound()
+    
+    
+    # show_Ultrasound()
     
     
     

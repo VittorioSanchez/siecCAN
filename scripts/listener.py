@@ -262,11 +262,13 @@ class MySend(Thread):
                 if (self.steering_center == 0):
                     self.steering_angle = (int(codecs.encode(msg.data[0:2],'hex'), 16))
                 else:
-                    self.steering_angle = (int(codecs.encode(msg.data[0:2],'hex'), 16)-self.steering_center)/19.45
+                    self.steering_angle = (int(codecs.encode(msg.data[0:2],'hex'), 16)-(self.steering_center-107))/19.45
+                    #print(self.steering_angle)
                 # Battery level
                 self.batt_level = ((int(codecs.encode(msg.data[2:4],'hex'), 16)*(3.3/0.20408))/4095)
                 # Left wheel speed
                 self.motor_speed_L = int(codecs.encode(msg.data[4:6],'hex'), 16)*0.01
+                print(self.motor_speed_L)
                 # Right wheel speed
                 # header : SWR payload : integer, *0.01rpm
                 self.motor_speed_R= int(codecs.encode(msg.data[6:8],'hex'), 16)*0.01
@@ -629,8 +631,8 @@ class MyTalker(Thread):
         pubUltr1 = rospy.Publisher('/ultrasonic_sensors1', Float32MultiArray, queue_size=10)
         pubUltr2 = rospy.Publisher('/ultrasonic_sensors2', Float32MultiArray, queue_size=10)
         pubGPS = rospy.Publisher('/GPS_coordinates', NavSatFix, queue_size=10)
-        pubIMUraw = rospy.Publisher('/IMU_raw_data', Imu, queue_size=10)
-        pubIMUmagn = rospy.Publisher('IMU_magneto', MagneticField, queue_size=10)
+        pubIMUraw = rospy.Publisher('imu/data_raw', Imu, queue_size=10)
+        pubIMUmagn = rospy.Publisher('imu/mag', MagneticField, queue_size=10)
 
         #rospy.init_node('talker', anonymous=True)
         rate = rospy.Rate(10) # 10hz
@@ -659,6 +661,7 @@ class MyTalker(Thread):
         #GPS publisher
         rateGPS = rospy.Rate(10)
         vectGPS = NavSatFix()
+        vectGPS.header.frame_id = "base_link"
         vectGPS.status.status = 1
         vectGPS.status.service = 1
         vectGPS.altitude = 0.0
@@ -670,6 +673,7 @@ class MyTalker(Thread):
         #IMU raw data publisher
         rateIMUraw = rospy.Rate(10)
         vectIMUraw = Imu()
+        vectIMUraw.header.frame_id = "imu_link"
         vectIMUraw.orientation.x = 0.0
         vectIMUraw.orientation.y = 0.0
         vectIMUraw.orientation.z = 0.0
@@ -687,12 +691,14 @@ class MyTalker(Thread):
         #IMU magnetic field publisher
         rateIMUmagn = rospy.Rate(10)
         vectIMUmagn = MagneticField()
+        vectIMUmagn.header.frame_id = "imu_link"
         vectIMUmagn.magnetic_field_covariance[0] = 0.0
         vectIMUmagn.magnetic_field_covariance[4] = 0.0
         vectIMUmagn.magnetic_field_covariance[8] = 0.0
 
 
-        while not rospy.is_shutdown():            
+        while not rospy.is_shutdown():       
+            current_time = rospy.Time.now()     
             MOTOR_SENSORS.MUT.acquire()
             vect.data = [MOTOR_SENSORS.steering_angle, MOTOR_SENSORS.batt_level, MOTOR_SENSORS.motor_speed_L, MOTOR_SENSORS.motor_speed_R]    
             MOTOR_SENSORS.MUT.release()
@@ -719,6 +725,7 @@ class MyTalker(Thread):
             rateGPS.sleep()
 
             IMU.MUT.acquire()
+            vectIMUraw.header.stamp = current_time
             vectIMUraw.angular_velocity.x = IMU.x_rotation
             vectIMUraw.angular_velocity.y = IMU.y_rotation
             vectIMUraw.angular_velocity.z = IMU.z_rotation
@@ -730,6 +737,7 @@ class MyTalker(Thread):
             rateIMUraw.sleep()
 
             IMU.MUT.acquire()
+            vectIMUmagn.header.stamp = current_time
             vectIMUmagn.magnetic_field.x = IMU.x_magneto
             vectIMUmagn.magnetic_field.y = IMU.y_magneto
             vectIMUmagn.magnetic_field.z = IMU.z_magneto

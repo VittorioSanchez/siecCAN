@@ -14,6 +14,7 @@ def talker():
         
         #move_cmd = Twist()
         move_cmd.linear.x = input("Valeur  vitesse (float): ")
+        #move_cmd.angular.z=-30
         #rospy.loginfo(hello_str)
         pub.publish(move_cmd)
         rate.sleep()
