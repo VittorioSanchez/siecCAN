@@ -262,7 +262,7 @@ class MySend(Thread):
                 if (self.steering_center == 0):
                     self.steering_angle = (int(codecs.encode(msg.data[0:2],'hex'), 16))
                 else:
-                    self.steering_angle = (int(codecs.encode(msg.data[0:2],'hex'), 16)-(self.steering_center-107))/19.45
+                    self.steering_angle = (int(codecs.encode(msg.data[0:2],'hex'), 16)-(self.steering_center+60))/19.45
                     #print(self.steering_angle)
                 # Battery level
                 self.batt_level = ((int(codecs.encode(msg.data[2:4],'hex'), 16)*(3.3/0.20408))/4095)
